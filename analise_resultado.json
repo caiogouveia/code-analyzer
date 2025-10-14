@@ -1,0 +1,47 @@
+{
+  "cocomo": {
+    "kloc": 0.739,
+    "effort_person_months": 1.746979875141227,
+    "time_months": 3.0903624019376212,
+    "people_required": 0.5652993558444444,
+    "maintenance_people": 0.10175388405199998,
+    "expansion_people": 0.1695898067533333,
+    "productivity": 423.01574878775216,
+    "cost_estimate_brl": 26204.698127118405,
+    "complexity_level": "Baixa"
+  },
+  "git": {
+    "total_commits": 1,
+    "total_authors": 1,
+    "authors_commits": {
+      "Eusener Castilho": 1
+    },
+    "total_insertions": 1210,
+    "total_deletions": 0,
+    "avg_changes_per_commit": 1210.0,
+    "avg_files_per_commit": 6.0,
+    "commits_per_day": 1.0,
+    "first_commit_date": "2025-10-13T18:09:16",
+    "last_commit_date": "2025-10-13T18:09:16",
+    "repository_age_days": 1
+  },
+  "integrated": {
+    "cocomo_kloc": 0.739,
+    "cocomo_effort": 1.746979875141227,
+    "cocomo_time_months": 3.0903624019376212,
+    "cocomo_people": 0.5652993558444444,
+    "cocomo_cost_brl": 26204.698127118405,
+    "total_commits": 1,
+    "avg_changes_per_commit": 1210.0,
+    "commits_per_month": 30.0,
+    "lines_per_commit": 739.0,
+    "commits_needed_to_rebuild": 1.0,
+    "actual_velocity": 739.0,
+    "estimated_velocity": 19.22798858126146,
+    "velocity_ratio": 38.433557253107004,
+    "commit_efficiency": 61.074380165289256,
+    "change_percentage_per_commit": 163.73477672530447,
+    "developer_productivity_score": 84.16115702479338
+  },
+  "generated_at": "2025-10-13T18:19:23.117434"
+}
