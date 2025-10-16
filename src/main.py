@@ -7,10 +7,21 @@ Analisa complexidade, esforço, tempo e recursos necessários para desenvolvimen
 import os
 import sys
 import argparse
-from importlib import import_module
 from pathlib import Path
 
-from analysis_config import COCOMO_COEFFICIENTS, COMPLEXITY_THRESHOLDS, compile_exclusion_spec
+from rich.console import Console
+from rich.panel import Panel
+from rich import box
+from rich.text import Text
+
+from analysis_config import (
+    COCOMO_COEFFICIENTS,
+    COMPLEXITY_THRESHOLDS,
+    DEFAULT_MONTHLY_SALARY_BRL,
+    MAINTENANCE_TEAM_PERCENTAGE,
+    EXPANSION_TEAM_PERCENTAGE,
+    compile_exclusion_spec,
+)
 from insights import build_cocomo_insights, build_ai_insights
 from models import CodeMetrics, CocomoResults
 from renderers import (
@@ -19,11 +30,6 @@ from renderers import (
     build_cocomo_table,
     build_cost_panel,
 )
-
-Console = import_module("rich.console").Console
-Panel = import_module("rich.panel").Panel
-box = import_module("rich.box")
-Text = import_module("rich.text").Text
 
 
 # Extensões de arquivo por linguagem
@@ -146,7 +152,7 @@ class CodeAnalyzer:
                 else:
                     self.metrics.languages[language] = code
 
-    def calculate_cocomo2(self, avg_salary_month_brl: float = 15000.0) -> CocomoResults:
+    def calculate_cocomo2(self, avg_salary_month_brl: float = DEFAULT_MONTHLY_SALARY_BRL) -> CocomoResults:
         """Calcula métricas usando COCOMO II.
 
         Args:
@@ -173,11 +179,11 @@ class CodeAnalyzer:
         # Pessoas necessárias: P = E / T
         people = effort / time if time > 0 else 0
 
-        # Manutenção: tipicamente 15-20% da equipe de desenvolvimento
-        maintenance = people * 0.18
+        # Manutenção: percentual configurável da equipe de desenvolvimento
+        maintenance = people * MAINTENANCE_TEAM_PERCENTAGE
 
-        # Expansão: tipicamente 25-35% da equipe de desenvolvimento
-        expansion = people * 0.30
+        # Expansão: percentual configurável da equipe de desenvolvimento
+        expansion = people * EXPANSION_TEAM_PERCENTAGE
 
         # Produtividade: LOC por pessoa-mês
         productivity = (self.metrics.code_lines / effort) if effort > 0 else 0

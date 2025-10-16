@@ -10,11 +10,12 @@ from typing import Optional, Dict, Any
 from dataclasses import asdict
 
 from openai import OpenAI
-from models import CocomoResults, GitMetrics, IntegratedMetrics, CodeMetrics
+from models import CocomoResults, GitMetrics, IntegratedMetrics, CodeMetrics, SecurityMetrics
+from utils.score_calculator import calculate_security_score
 from dotenv import load_dotenv
 
 load_dotenv()  # Carrega variáveis de ambiente do .env
-
+# print("Variáveis de ambiente carregadas do .env:", os.getenv("OPENAI_API_KEY"))
 class AIInsightsGenerator:
     """Gerador de insights usando IA da OpenAI"""
 
@@ -41,6 +42,7 @@ class AIInsightsGenerator:
         git: Optional[GitMetrics] = None,
         integrated: Optional[IntegratedMetrics] = None,
         code_metrics: Optional[CodeMetrics] = None,
+        security: Optional[SecurityMetrics] = None,
         project_name: str = "Projeto",
         project_description: Optional[str] = None
     ) -> Dict[str, Any]:
@@ -52,6 +54,7 @@ class AIInsightsGenerator:
             git: Métricas Git (opcional)
             integrated: Métricas integradas (opcional)
             code_metrics: Métricas de código (opcional)
+            security: Métricas de segurança (opcional)
             project_name: Nome do projeto
             project_description: Descrição do projeto (opcional)
 
@@ -61,7 +64,7 @@ class AIInsightsGenerator:
 
         # Prepara contexto
         context = self._prepare_context(
-            cocomo, git, integrated, code_metrics,
+            cocomo, git, integrated, code_metrics, security,
             project_name, project_description
         )
 
@@ -113,6 +116,7 @@ class AIInsightsGenerator:
         git: Optional[GitMetrics],
         integrated: Optional[IntegratedMetrics],
         code_metrics: Optional[CodeMetrics],
+        security: Optional[SecurityMetrics],
         project_name: str,
         project_description: Optional[str]
     ) -> Dict[str, Any]:
@@ -172,6 +176,28 @@ class AIInsightsGenerator:
                 "developer_productivity_score": integrated.developer_productivity_score,
             }
 
+        if security:
+            # Calcula score de segurança
+            security_score = calculate_security_score(security)
+
+            context["security_metrics"] = {
+                "total_findings": security.total_findings,
+                "critical_findings": security.critical_findings,
+                "high_findings": security.high_findings,
+                "medium_findings": security.medium_findings,
+                "low_findings": security.low_findings,
+                "info_findings": security.info_findings,
+                "security_issues": security.security_issues,
+                "best_practice_issues": security.best_practice_issues,
+                "performance_issues": security.performance_issues,
+                "security_score": security_score,
+                "files_scanned": security.files_scanned,
+                "scan_duration_seconds": security.scan_duration_seconds,
+                "top_vulnerable_files": dict(list(security.files_with_issues.items())[:5]) if security.files_with_issues else {},
+                "cwe_categories": security.cwe_categories,
+                "owasp_categories": security.owasp_categories,
+            }
+
         return context
 
     def _build_prompt(self, context: Dict[str, Any]) -> str:
@@ -203,6 +229,12 @@ MÉTRICAS GIT:
             prompt += f"""
 MÉTRICAS INTEGRADAS:
 {json.dumps(context['integrated_metrics'], indent=2)}
+"""
+
+        if "security_metrics" in context:
+            prompt += f"""
+MÉTRICAS DE SEGURANÇA (Análise Semgrep):
+{json.dumps(context['security_metrics'], indent=2)}
 """
 
         prompt += """
@@ -239,10 +271,22 @@ Forneça uma análise estruturada em JSON com os seguintes campos:
     "monetizacao": ["lista de 3-4 oportunidades de monetização"],
     "expansao": ["lista de 3-4 oportunidades de expansão"],
     "otimizacao": ["lista de 3-4 áreas de otimização com maior impacto"]
+  },
+  "analise_seguranca": {
+    "avaliacao_geral": "string (avaliação geral do estado de segurança do projeto)",
+    "nivel_risco": "string (BAIXO/MÉDIO/ALTO/CRÍTICO com justificativa)",
+    "vulnerabilidades_criticas": ["lista de vulnerabilidades mais críticas que devem ser corrigidas imediatamente"],
+    "prioridades_correcao": ["lista ordenada por prioridade das correções de segurança recomendadas"],
+    "impacto_negocio": "string (impacto potencial das vulnerabilidades no negócio)",
+    "compliance": "string (considerações sobre conformidade e regulamentação)",
+    "recomendacoes_urgentes": ["lista de 3-5 ações urgentes para melhorar segurança"]
   }
 }
 
-Seja específico, baseie-se nos dados fornecidos e forneça insights acionáveis e relevantes para o contexto brasileiro de desenvolvimento de software.
+IMPORTANTE:
+- Se houver métricas de segurança disponíveis, analise-as detalhadamente na seção "analise_seguranca"
+- Se não houver métricas de segurança, ainda assim forneça a seção "analise_seguranca" com recomendações gerais
+- Seja específico, baseie-se nos dados fornecidos e forneça insights acionáveis e relevantes para o contexto brasileiro de desenvolvimento de software.
 """
 
         return prompt
@@ -358,6 +402,50 @@ Seja específico, baseie-se nos dados fornecidos e forneça insights acionáveis
                 for oport in op["otimizacao"]:
                     output.append(f"  • {oport}")
 
+        # Análise de Segurança
+        if "analise_seguranca" in data:
+            seg = data["analise_seguranca"]
+            output.append("\n\n[bold cyan]🔒 ANÁLISE DE SEGURANÇA[/bold cyan]")
+
+            if "avaliacao_geral" in seg:
+                output.append(f"\n{seg['avaliacao_geral']}\n")
+
+            if "nivel_risco" in seg:
+                # Coloração baseada no nível de risco
+                nivel = seg['nivel_risco'].upper()
+                if "CRÍTICO" in nivel or "CRITICO" in nivel:
+                    color = "red"
+                elif "ALTO" in nivel:
+                    color = "orange1"
+                elif "MÉDIO" in nivel or "MEDIO" in nivel:
+                    color = "yellow"
+                else:
+                    color = "green"
+                output.append(f"[bold {color}]Nível de Risco:[/bold {color}] {seg['nivel_risco']}")
+
+            if "vulnerabilidades_criticas" in seg and seg["vulnerabilidades_criticas"]:
+                output.append("\n[bold red]⚠️  Vulnerabilidades Críticas:[/bold red]")
+                for vuln in seg["vulnerabilidades_criticas"]:
+                    output.append(f"  • {vuln}")
+
+            if "prioridades_correcao" in seg and seg["prioridades_correcao"]:
+                output.append("\n[bold yellow]🔧 Prioridades de Correção:[/bold yellow]")
+                for i, prio in enumerate(seg["prioridades_correcao"], 1):
+                    output.append(f"  {i}. {prio}")
+
+            if "impacto_negocio" in seg:
+                output.append(f"\n[bold]Impacto no Negócio:[/bold]")
+                output.append(f"{seg['impacto_negocio']}")
+
+            if "compliance" in seg:
+                output.append(f"\n[bold]Compliance:[/bold]")
+                output.append(f"{seg['compliance']}")
+
+            if "recomendacoes_urgentes" in seg and seg["recomendacoes_urgentes"]:
+                output.append("\n[bold red]🚨 Recomendações Urgentes:[/bold red]")
+                for rec in seg["recomendacoes_urgentes"]:
+                    output.append(f"  • {rec}")
+
         # Rodapé
         tokens = insights.get("tokens_used", 0)
         model = insights.get("model", "unknown")
@@ -371,6 +459,7 @@ def generate_ai_insights(
     git: Optional[GitMetrics] = None,
     integrated: Optional[IntegratedMetrics] = None,
     code_metrics: Optional[CodeMetrics] = None,
+    security: Optional[SecurityMetrics] = None,
     project_name: str = "Projeto",
     project_description: Optional[str] = None,
     api_key: Optional[str] = None
@@ -383,6 +472,7 @@ def generate_ai_insights(
         git: Métricas Git (opcional)
         integrated: Métricas integradas (opcional)
         code_metrics: Métricas de código (opcional)
+        security: Métricas de segurança (opcional)
         project_name: Nome do projeto
         project_description: Descrição do projeto
         api_key: Chave API OpenAI (usa env var se não fornecida)
@@ -397,6 +487,7 @@ def generate_ai_insights(
             git=git,
             integrated=integrated,
             code_metrics=code_metrics,
+            security=security,
             project_name=project_name,
             project_description=project_description
         )

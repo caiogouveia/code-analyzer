@@ -43,8 +43,11 @@ htmlcov/
 uv.lock
 
 # Reports
-reports/
+reports/*
 *.json
-
+scripts/
 # Environment variables
 .env
+
+CLAUDE.md
+.claude

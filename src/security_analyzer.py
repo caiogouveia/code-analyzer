@@ -8,65 +8,18 @@ import json
 import subprocess
 import tempfile
 from pathlib import Path
-from dataclasses import dataclass, field, asdict
 from typing import List, Dict, Optional
 from datetime import datetime
 
-
-@dataclass
-class SecurityFinding:
-    """Representa uma descoberta de segurança do Semgrep"""
-
-    rule_id: str
-    severity: str  # ERROR, WARNING, INFO
-    category: str  # security, best-practice, performance, etc
-    message: str
-    file_path: str
-    line: int
-    code_snippet: str = ""
-    cwe: Optional[str] = None
-    owasp: Optional[str] = None
-    confidence: str = "HIGH"  # HIGH, MEDIUM, LOW
-
-    def to_dict(self) -> Dict:
-        return asdict(self)
-
-
-@dataclass
-class SecurityMetrics:
-    """Métricas agregadas de segurança"""
-
-    total_findings: int = 0
-    critical_findings: int = 0
-    high_findings: int = 0
-    medium_findings: int = 0
-    low_findings: int = 0
-    info_findings: int = 0
-
-    # Por categoria
-    security_issues: int = 0
-    best_practice_issues: int = 0
-    performance_issues: int = 0
-
-    # Por tipo CWE/OWASP
-    cwe_categories: Dict[str, int] = field(default_factory=dict)
-    owasp_categories: Dict[str, int] = field(default_factory=dict)
-
-    # Arquivos mais problemáticos
-    files_with_issues: Dict[str, int] = field(default_factory=dict)
-
-    # Lista de descobertas
-    findings: List[SecurityFinding] = field(default_factory=list)
-
-    scan_duration_seconds: float = 0.0
-    rules_used: int = 0
-    files_scanned: int = 0
-    scan_timestamp: str = ""
-
-    def to_dict(self) -> Dict:
-        data = asdict(self)
-        data['findings'] = [f.to_dict() for f in self.findings]
-        return data
+from models import SecurityFinding, SecurityMetrics
+from utils.score_calculator import calculate_security_score
+from analysis_config import (
+    SEMGREP_SEVERITY_MAP,
+    SEMGREP_TIMEOUT_SECONDS,
+    SEMGREP_FILE_TIMEOUT_SECONDS,
+    SEMGREP_MAX_FILE_SIZE_MB,
+    DEFAULT_MAX_SECURITY_FINDINGS,
+)
 
 
 class SecurityAnalyzer:
@@ -89,7 +42,7 @@ class SecurityAnalyzer:
         except (subprocess.TimeoutExpired, FileNotFoundError):
             return False
 
-    def analyze(self, config: str = "auto", max_findings: int = 500) -> SecurityMetrics:
+    def analyze(self, config: str = "auto", max_findings: int = DEFAULT_MAX_SECURITY_FINDINGS) -> SecurityMetrics:
         """
         Executa análise de segurança usando Semgrep
 
@@ -118,8 +71,8 @@ class SecurityAnalyzer:
             'semgrep',
             '--config', config,
             '--json',
-            '--max-target-bytes', '5MB',  # Limita tamanho de arquivos
-            '--timeout', '60',  # Timeout por arquivo
+            '--max-target-bytes', f'{SEMGREP_MAX_FILE_SIZE_MB}MB',
+            '--timeout', str(SEMGREP_FILE_TIMEOUT_SECONDS),
             '--quiet',  # Menos verbose
             str(self.project_path)
         ]
@@ -130,7 +83,7 @@ class SecurityAnalyzer:
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=300  # 5 minutos de timeout total
+                timeout=SEMGREP_TIMEOUT_SECONDS
             )
 
             # Parse do resultado JSON
@@ -232,12 +185,7 @@ class SecurityAnalyzer:
 
     def _normalize_severity(self, severity: str) -> str:
         """Normaliza a severidade para um padrão consistente"""
-        severity_map = {
-            'ERROR': 'CRITICAL',
-            'WARNING': 'HIGH',
-            'INFO': 'INFO',
-        }
-        return severity_map.get(severity.upper(), severity.upper())
+        return SEMGREP_SEVERITY_MAP.get(severity.upper(), severity.upper())
 
     def _update_metrics(self, finding: SecurityFinding):
         """Atualiza as métricas com base em uma nova descoberta"""
@@ -282,31 +230,7 @@ class SecurityAnalyzer:
         100 = sem problemas
         0 = muitos problemas críticos
         """
-        if self.metrics.total_findings == 0:
-            return 100.0
-
-        # Pesos por severidade
-        critical_weight = 10
-        high_weight = 5
-        medium_weight = 2
-        low_weight = 1
-
-        # Calcula pontuação negativa
-        negative_score = (
-            self.metrics.critical_findings * critical_weight +
-            self.metrics.high_findings * high_weight +
-            self.metrics.medium_findings * medium_weight +
-            self.metrics.low_findings * low_weight
-        )
-
-        # Normaliza para 0-100 (quanto mais negativo, pior o score)
-        # Usa escala logarítmica para suavizar
-        import math
-        if negative_score == 0:
-            return 100.0
-
-        score = max(0, 100 - (math.log1p(negative_score) * 10))
-        return round(score, 2)
+        return calculate_security_score(self.metrics)
 
     def get_top_vulnerable_files(self, limit: int = 10) -> List[tuple]:
         """Retorna os arquivos mais vulneráveis"""

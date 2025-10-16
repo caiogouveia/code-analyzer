@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
-from importlib import import_module
-from typing import Any, Optional
+from typing import Optional
+
+from rich.table import Table
+from rich.panel import Panel
+from rich import box
 
 from models import CodeMetrics, CocomoResults, GitMetrics, IntegratedMetrics
 
 
-def _new_table(title: str) -> Any:
-    table_module = import_module("rich.table")
-    box_module = import_module("rich.box")
-    Table = table_module.Table
-    box = box_module
+def _new_table(title: str) -> Table:
+    """Cria uma nova tabela Rich com estilo padrão."""
     return Table(
         title=title,
         box=box.ROUNDED,
@@ -70,11 +70,8 @@ def build_cocomo_table(cocomo: CocomoResults) -> Any:
     return table
 
 
-def build_cost_panel(cocomo: CocomoResults) -> Any:
-    box_module = import_module("rich.box")
-    panel_module = import_module("rich.panel")
-    Panel = panel_module.Panel
-    box = box_module
+def build_cost_panel(cocomo: CocomoResults) -> Panel:
+    """Cria painel com estimativa de custo."""
     return Panel(
         f"[bold green]R$ {cocomo.cost_estimate_brl:,.2f}[/bold green]\n\n"
         "[dim]Baseado em R$15.000/pessoa-mês[/dim]\n"
@@ -136,12 +133,9 @@ def build_integrated_table(integrated: IntegratedMetrics) -> Any:
     return table
 
 
-def build_score_panel(score: float) -> Any:
+def build_score_panel(score: float) -> Panel:
+    """Cria painel com score de produtividade."""
     score_color = "green" if score >= 75 else "yellow" if score >= 50 else "red"
-    box_module = import_module("rich.box")
-    panel_module = import_module("rich.panel")
-    Panel = panel_module.Panel
-    box = box_module
     return Panel(
         f"[bold {score_color}]{score:.1f}/100[/bold {score_color}]\n\n"
         "[dim]Score baseado em velocidade, eficiência e complexidade[/dim]",

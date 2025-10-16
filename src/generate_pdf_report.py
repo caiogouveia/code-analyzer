@@ -8,6 +8,8 @@ import sys
 from pathlib import Path
 from datetime import datetime
 from reportlab.lib import colors
+from utils.score_calculator import calculate_security_score
+from utils.formatters import format_number as fmt_number
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch, cm
@@ -123,12 +125,11 @@ def create_matplotlib_chart(data, chart_type='bar', title='', labels=None, value
 
 
 def format_number(value, decimals=2):
-    """Formata números com separadores de milhares"""
-    if isinstance(value, (int, float)):
-        if decimals == 0:
-            return f"{value:,.0f}".replace(',', '.')
-        return f"{value:,.{decimals}f}".replace(',', 'X').replace('.', ',').replace('X', '.')
-    return str(value)
+    """
+    Formata números com separadores de milhares (wrapper para compatibilidade).
+    DEPRECATED: Use utils.formatters.format_number diretamente.
+    """
+    return fmt_number(value, decimals)
 
 
 def create_info_table(data, title):
@@ -326,6 +327,50 @@ def format_ai_insights_for_pdf(insights_data, body_style):
                 for oport in op[tipo]:
                     elements.append(Paragraph(f"• {oport}", body_style))
                 elements.append(Spacer(1, 0.2*cm))
+
+    # Análise de Segurança
+    if "analise_seguranca" in insights_data:
+        seg = insights_data["analise_seguranca"]
+
+        elements.append(Paragraph("<b>ANÁLISE DE SEGURANÇA</b>",
+                                 ParagraphStyle('SubHeading', fontSize=12, textColor=COLORS['danger'], spaceAfter=10)))
+
+        if "avaliacao_geral" in seg:
+            elements.append(Paragraph("<b>Avaliação Geral:</b>", body_style))
+            elements.append(Paragraph(seg["avaliacao_geral"], body_style))
+            elements.append(Spacer(1, 0.3*cm))
+
+        if "nivel_risco" in seg:
+            elements.append(Paragraph(f"<b>Nível de Risco:</b> {seg['nivel_risco']}", body_style))
+            elements.append(Spacer(1, 0.3*cm))
+
+        if "vulnerabilidades_criticas" in seg and seg["vulnerabilidades_criticas"]:
+            elements.append(Paragraph("<b>Vulnerabilidades Críticas:</b>", body_style))
+            for vuln in seg["vulnerabilidades_criticas"]:
+                elements.append(Paragraph(f"• {vuln}", body_style))
+            elements.append(Spacer(1, 0.3*cm))
+
+        if "prioridades_correcao" in seg and seg["prioridades_correcao"]:
+            elements.append(Paragraph("<b>Prioridades de Correção:</b>", body_style))
+            for i, prio in enumerate(seg["prioridades_correcao"], 1):
+                elements.append(Paragraph(f"{i}. {prio}", body_style))
+            elements.append(Spacer(1, 0.3*cm))
+
+        if "impacto_negocio" in seg:
+            elements.append(Paragraph("<b>Impacto no Negócio:</b>", body_style))
+            elements.append(Paragraph(seg["impacto_negocio"], body_style))
+            elements.append(Spacer(1, 0.3*cm))
+
+        if "compliance" in seg:
+            elements.append(Paragraph("<b>Compliance:</b>", body_style))
+            elements.append(Paragraph(seg["compliance"], body_style))
+            elements.append(Spacer(1, 0.3*cm))
+
+        if "recomendacoes_urgentes" in seg and seg["recomendacoes_urgentes"]:
+            elements.append(Paragraph("<b>Recomendações Urgentes:</b>", body_style))
+            for rec in seg["recomendacoes_urgentes"]:
+                elements.append(Paragraph(f"• {rec}", body_style))
+            elements.append(Spacer(1, 0.3*cm))
 
     return elements
 
@@ -577,32 +622,28 @@ def generate_pdf_report(json_file_path, output_pdf_path=None, include_ai_insight
         elements.append(Paragraph(security_intro_text, body_style))
         elements.append(Spacer(1, 0.5*cm))
 
-        # Calcula o score de segurança
-        def calculate_security_score(sec_data):
-            total_findings = sec_data.get('total_findings', 0)
+        # Calcula o score de segurança usando SecurityMetrics
+        from models import SecurityMetrics
+
+        # Reconstrói SecurityMetrics do dict
+        try:
+            security_metrics_obj = SecurityMetrics(**security)
+            security_score = calculate_security_score(security_metrics_obj)
+        except Exception:
+            # Fallback: calcula manualmente se não conseguir reconstruir
+            total_findings = security.get('total_findings', 0)
             if total_findings == 0:
-                return 100.0
-
-            critical_weight = 10
-            high_weight = 5
-            medium_weight = 2
-            low_weight = 1
-
-            negative_score = (
-                sec_data.get('critical_findings', 0) * critical_weight +
-                sec_data.get('high_findings', 0) * high_weight +
-                sec_data.get('medium_findings', 0) * medium_weight +
-                sec_data.get('low_findings', 0) * low_weight
-            )
-
-            import math
-            if negative_score == 0:
-                return 100.0
-
-            score = max(0, 100 - (math.log1p(negative_score) * 10))
-            return round(score, 2)
-
-        security_score = calculate_security_score(security)
+                security_score = 100.0
+            else:
+                import math
+                negative_score = (
+                    security.get('critical_findings', 0) * 10 +
+                    security.get('high_findings', 0) * 5 +
+                    security.get('medium_findings', 0) * 2 +
+                    security.get('low_findings', 0) * 1
+                )
+                security_score = max(0, 100 - (math.log1p(negative_score) * 10)) if negative_score > 0 else 100.0
+                security_score = round(security_score, 2)
         score_color = COLORS['success'] if security_score >= 80 else \
                       COLORS['warning'] if security_score >= 60 else COLORS['danger']
 
@@ -814,14 +855,25 @@ def generate_pdf_report(json_file_path, output_pdf_path=None, include_ai_insight
             # Importa os módulos necessários
             from ai_insights import generate_ai_insights
             from models import CocomoResults
+            from security_analyzer import SecurityMetrics
 
             # Reconstrói os objetos a partir do JSON
             cocomo_obj = CocomoResults(**cocomo)
+
+            # Reconstrói SecurityMetrics se disponível
+            security_obj = None
+            if 'security' in data and data['security']:
+                try:
+                    security_obj = SecurityMetrics(**data['security'])
+                except Exception:
+                    # Se falhar ao reconstruir, passa None
+                    pass
 
             # Tenta gerar insights
             print("Gerando insights de IA...")
             ai_result = generate_ai_insights(
                 cocomo=cocomo_obj,
+                security=security_obj,
                 project_name=data.get('project_name', 'Projeto'),
                 project_description=None
             )
@@ -862,7 +914,27 @@ def generate_pdf_report(json_file_path, output_pdf_path=None, include_ai_insight
     security_conclusion = ""
     if 'security' in data and data['security']:
         security = data['security']
-        security_score = calculate_security_score(security)
+        from models import SecurityMetrics
+
+        # Reconstrói SecurityMetrics ou calcula manualmente
+        try:
+            security_metrics_obj = SecurityMetrics(**security)
+            security_score = calculate_security_score(security_metrics_obj)
+        except Exception:
+            total_findings = security.get('total_findings', 0)
+            if total_findings == 0:
+                security_score = 100.0
+            else:
+                import math
+                negative_score = (
+                    security.get('critical_findings', 0) * 10 +
+                    security.get('high_findings', 0) * 5 +
+                    security.get('medium_findings', 0) * 2 +
+                    security.get('low_findings', 0) * 1
+                )
+                security_score = max(0, 100 - (math.log1p(negative_score) * 10)) if negative_score > 0 else 100.0
+                security_score = round(security_score, 2)
+
         security_status = "excelente" if security_score >= 80 else "bom" if security_score >= 60 else "necessita atenção"
 
         security_conclusion = f"""

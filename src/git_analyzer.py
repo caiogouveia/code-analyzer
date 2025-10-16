@@ -25,74 +25,10 @@ from rich.text import Text
 from main import CodeAnalyzer, CocomoResults
 # Importa o analisador de segurança
 from security_analyzer import SecurityAnalyzer, SecurityMetrics
-
-
-@dataclass
-class CommitInfo:
-    """Informações de um commit"""
-    hash: str
-    author: str
-    date: datetime
-    message: str
-    files_changed: int
-    insertions: int
-    deletions: int
-    total_changes: int
-
-    def to_dict(self):
-        return {
-            **asdict(self),
-            'date': self.date.isoformat()
-        }
-
-
-@dataclass
-class GitMetrics:
-    """Métricas do repositório Git"""
-    total_commits: int
-    total_authors: int
-    authors_commits: Dict[str, int]
-    total_insertions: int
-    total_deletions: int
-    avg_changes_per_commit: float
-    avg_files_per_commit: float
-    commits_per_day: float
-    first_commit_date: datetime
-    last_commit_date: datetime
-    repository_age_days: int
-
-    def to_dict(self):
-        return {
-            **asdict(self),
-            'first_commit_date': self.first_commit_date.isoformat(),
-            'last_commit_date': self.last_commit_date.isoformat()
-        }
-
-
-@dataclass
-class IntegratedMetrics:
-    """Métricas integradas entre COCOMO II e Git"""
-    # COCOMO II
-    cocomo_kloc: float
-    cocomo_effort: float
-    cocomo_time_months: float
-    cocomo_people: float
-    cocomo_cost_brl: float
-
-    # Git
-    total_commits: int
-    avg_changes_per_commit: float
-    commits_per_month: float
-
-    # Indicadores calculados
-    lines_per_commit: float
-    commits_needed_to_rebuild: float
-    actual_velocity: float  # linhas/dia baseado no histórico
-    estimated_velocity: float  # linhas/dia baseado no COCOMO
-    velocity_ratio: float  # real/estimado
-    commit_efficiency: float  # % de código útil vs churn
-    change_percentage_per_commit: float  # % média de mudança por commit
-    developer_productivity_score: float  # score de produtividade
+# Importa os modelos consolidados
+from models import CommitInfo, GitMetrics, IntegratedMetrics
+# Importa constantes
+from analysis_config import WORKING_DAYS_PER_MONTH
 
 
 class GitAnalyzer:
@@ -228,11 +164,19 @@ class GitAnalyzer:
 
 
 class IntegratedAnalyzer:
-    """Análise integrada entre COCOMO II e Git"""
+    """
+    Análise integrada entre COCOMO II e Git.
+
+    Facade que delega para IntegratedAnalysisService.
+    Mantido para compatibilidade com código existente.
+    """
 
     def __init__(self, repo_path: Path):
         self.repo_path = repo_path
         self.console = Console()
+        # Delega para o serviço
+        from services.integrated_analysis_service import IntegratedAnalysisService
+        self._service = IntegratedAnalysisService(repo_path)
 
     def analyze(self, avg_salary_month_brl: float = 15000.0,
                 run_security_analysis: bool = True,
@@ -245,53 +189,50 @@ class IntegratedAnalyzer:
             security_config: Configuração do Semgrep (padrão: 'auto')
         """
 
-        security_metrics = None
-
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
             console=self.console
         ) as progress:
 
-            # Análise COCOMO II
-            task1 = progress.add_task("[cyan]Analisando código (COCOMO II)...", total=None)
-            code_analyzer = CodeAnalyzer(self.repo_path)
-            code_analyzer.analyze_directory()
+            def progress_callback(percent: int, message: str):
+                """Callback para atualizar progresso."""
+                # Mapeia porcentagens para tarefas do Progress
+                if percent <= 30:
+                    if not hasattr(progress_callback, 'task1'):
+                        progress_callback.task1 = progress.add_task(f"[cyan]{message}", total=None)
+                    else:
+                        progress.update(progress_callback.task1, description=f"[cyan]{message}")
+                elif percent <= 60:
+                    if hasattr(progress_callback, 'task1'):
+                        progress.update(progress_callback.task1, completed=True)
+                    if not hasattr(progress_callback, 'task2'):
+                        progress_callback.task2 = progress.add_task(f"[cyan]{message}", total=None)
+                    else:
+                        progress.update(progress_callback.task2, description=f"[cyan]{message}")
+                elif percent <= 80:
+                    if hasattr(progress_callback, 'task2'):
+                        progress.update(progress_callback.task2, completed=True)
+                    if not hasattr(progress_callback, 'task3'):
+                        progress_callback.task3 = progress.add_task(f"[cyan]{message}", total=None)
+                    else:
+                        progress.update(progress_callback.task3, description=f"[cyan]{message}")
+                else:
+                    if hasattr(progress_callback, 'task3'):
+                        progress.update(progress_callback.task3, completed=True)
+                    if not hasattr(progress_callback, 'task4'):
+                        progress_callback.task4 = progress.add_task(f"[cyan]{message}", total=None)
+                    else:
+                        progress.update(progress_callback.task4, description=f"[cyan]{message}")
+                        progress.update(progress_callback.task4, completed=True)
 
-            if code_analyzer.metrics.files_count == 0:
-                raise ValueError("Nenhum arquivo de código encontrado")
-
-            cocomo_results = code_analyzer.calculate_cocomo2(avg_salary_month_brl)
-            progress.update(task1, completed=True)
-
-            # Análise Git
-            task2 = progress.add_task("[cyan]Analisando commits Git...", total=None)
-            git_analyzer = GitAnalyzer(self.repo_path)
-            commits = git_analyzer.get_commits()
-            git_metrics = git_analyzer.calculate_metrics(commits)
-            progress.update(task2, completed=True)
-
-            # Análise de Segurança
-            if run_security_analysis:
-                task4 = progress.add_task("[cyan]Analisando segurança (Semgrep)...", total=None)
-                try:
-                    security_analyzer = SecurityAnalyzer(self.repo_path)
-                    security_metrics = security_analyzer.analyze(config=security_config)
-                    progress.update(task4, completed=True)
-                except Exception as e:
-                    progress.update(task4, completed=True)
-                    self.console.print(f"[yellow]⚠ Aviso: Análise de segurança falhou: {e}[/yellow]")
-
-            # Cálculo de métricas integradas
-            task3 = progress.add_task("[cyan]Calculando indicadores integrados...", total=None)
-            integrated = self._calculate_integrated_metrics(
-                cocomo_results,
-                git_metrics,
-                code_analyzer.metrics.code_lines
+            # Delega para o serviço
+            return self._service.analyze(
+                avg_salary_month_brl=avg_salary_month_brl,
+                run_security_analysis=run_security_analysis,
+                security_config=security_config,
+                progress_callback=progress_callback
             )
-            progress.update(task3, completed=True)
-
-        return cocomo_results, git_metrics, integrated, security_metrics
 
     def _calculate_integrated_metrics(
         self,
@@ -299,73 +240,30 @@ class IntegratedAnalyzer:
         git: GitMetrics,
         total_lines: int
     ) -> IntegratedMetrics:
-        """Calcula métricas integradas"""
+        """
+        Calcula métricas integradas.
 
-        # Linhas por commit
-        lines_per_commit = total_lines / git.total_commits if git.total_commits > 0 else 0
-
-        # Commits necessários para recriar
-        commits_needed = cocomo.kloc * 1000 / lines_per_commit if lines_per_commit > 0 else 0
-
-        # Velocidade real (linhas/dia)
-        actual_velocity = total_lines / git.repository_age_days if git.repository_age_days > 0 else 0
-
-        # Velocidade estimada COCOMO (linhas/dia)
-        # COCOMO: produtividade em LOC/pessoa-mês, convertendo para LOC/dia
-        estimated_velocity = cocomo.productivity / 22 if cocomo.productivity > 0 else 0  # ~22 dias úteis/mês
-
-        # Razão velocidade (real/estimado)
-        velocity_ratio = actual_velocity / estimated_velocity if estimated_velocity > 0 else 0
-
-        # Eficiência do commit (linhas úteis vs churn)
-        total_changes = git.total_insertions + git.total_deletions
-        commit_efficiency = (total_lines / total_changes * 100) if total_changes > 0 else 0
-
-        # % média de mudança por commit
-        change_percentage_per_commit = (git.avg_changes_per_commit / total_lines * 100) if total_lines > 0 else 0
-
-        # Score de produtividade do desenvolvedor
-        # Baseado em: velocidade, eficiência e complexidade
-        base_score = 50
-        velocity_score = min((velocity_ratio * 25), 25)  # Max 25 pontos
-        efficiency_score = min((commit_efficiency / 100 * 15), 15)  # Max 15 pontos
-        complexity_bonus = 10 if cocomo.complexity_level == "Alta" else 5 if cocomo.complexity_level == "Média" else 0
-
-        developer_productivity_score = base_score + velocity_score + efficiency_score + complexity_bonus
-
-        # Commits por mês
-        commits_per_month = git.total_commits / (git.repository_age_days / 30) if git.repository_age_days > 0 else 0
-
-        return IntegratedMetrics(
-            cocomo_kloc=cocomo.kloc,
-            cocomo_effort=cocomo.effort_person_months,
-            cocomo_time_months=cocomo.time_months,
-            cocomo_people=cocomo.people_required,
-            cocomo_cost_brl=cocomo.cost_estimate_brl,
-            total_commits=git.total_commits,
-            avg_changes_per_commit=git.avg_changes_per_commit,
-            commits_per_month=commits_per_month,
-            lines_per_commit=lines_per_commit,
-            commits_needed_to_rebuild=commits_needed,
-            actual_velocity=actual_velocity,
-            estimated_velocity=estimated_velocity,
-            velocity_ratio=velocity_ratio,
-            commit_efficiency=commit_efficiency,
-            change_percentage_per_commit=change_percentage_per_commit,
-            developer_productivity_score=developer_productivity_score
-        )
+        Deprecated: Use IntegratedAnalysisService diretamente.
+        Mantido para compatibilidade.
+        """
+        return self._service._calculate_integrated_metrics(cocomo, git, total_lines)
 
     def display_results(
         self,
         cocomo: CocomoResults,
-        git: GitMetrics,
-        integrated: IntegratedMetrics,
+        git: Optional[GitMetrics],
+        integrated: Optional[IntegratedMetrics],
         security: Optional[SecurityMetrics] = None
     ):
         """Exibe resultados da análise integrada"""
 
         # Título
-        title_text = "ANÁLISE INTEGRADA: COCOMO II + GIT + SEGURANÇA" if security else "ANÁLISE INTEGRADA: COCOMO II + GIT"
+        if security:
+            title_text = "ANÁLISE INTEGRADA: COCOMO II + GIT + SEGURANÇA"
+        elif git:
+            title_text = "ANÁLISE INTEGRADA: COCOMO II + GIT"
+        else:
+            title_text = "ANÁLISE COCOMO II"
         title = Text(title_text, style="bold magenta")
         self.console.print("\n")
         self.console.print(Panel(title, box=box.DOUBLE, expand=False))
@@ -390,30 +288,31 @@ class IntegratedAnalyzer:
         self.console.print("\n")
         self.console.print(cocomo_table)
 
-        # Métricas Git
-        git_table = Table(
-            title="📈 Métricas do Repositório Git",
-            box=box.ROUNDED,
-            show_header=True,
-            header_style="bold cyan"
-        )
-        git_table.add_column("Métrica", style="yellow", width=30)
-        git_table.add_column("Valor", justify="right", style="green")
+        # Métricas Git (se disponível)
+        if git:
+            git_table = Table(
+                title="📈 Métricas do Repositório Git",
+                box=box.ROUNDED,
+                show_header=True,
+                header_style="bold cyan"
+            )
+            git_table.add_column("Métrica", style="yellow", width=30)
+            git_table.add_column("Valor", justify="right", style="green")
 
-        git_table.add_row("Total de Commits", f"{git.total_commits:,}")
-        git_table.add_row("Total de Autores", f"{git.total_authors}")
-        git_table.add_row("Idade do Repositório (dias)", f"{git.repository_age_days}")
-        git_table.add_row("Commits por Dia", f"{git.commits_per_day:.2f}")
-        git_table.add_row("Inserções Totais", f"{git.total_insertions:,}")
-        git_table.add_row("Deleções Totais", f"{git.total_deletions:,}")
-        git_table.add_row("Mudanças/Commit (média)", f"{git.avg_changes_per_commit:.1f}")
-        git_table.add_row("Arquivos/Commit (média)", f"{git.avg_files_per_commit:.1f}")
+            git_table.add_row("Total de Commits", f"{git.total_commits:,}")
+            git_table.add_row("Total de Autores", f"{git.total_authors}")
+            git_table.add_row("Idade do Repositório (dias)", f"{git.repository_age_days}")
+            git_table.add_row("Commits por Dia", f"{git.commits_per_day:.2f}")
+            git_table.add_row("Inserções Totais", f"{git.total_insertions:,}")
+            git_table.add_row("Deleções Totais", f"{git.total_deletions:,}")
+            git_table.add_row("Mudanças/Commit (média)", f"{git.avg_changes_per_commit:.1f}")
+            git_table.add_row("Arquivos/Commit (média)", f"{git.avg_files_per_commit:.1f}")
 
-        self.console.print("\n")
-        self.console.print(git_table)
+            self.console.print("\n")
+            self.console.print(git_table)
 
-        # Top contribuidores
-        if git.authors_commits:
+        # Top contribuidores (se Git disponível)
+        if git and git.authors_commits:
             authors_table = Table(
                 title="👥 Top 10 Contribuidores",
                 box=box.ROUNDED,
@@ -437,51 +336,53 @@ class IntegratedAnalyzer:
             self.console.print("\n")
             self.console.print(authors_table)
 
-        # Indicadores Integrados
-        integrated_table = Table(
-            title="🎯 Indicadores Integrados",
-            box=box.ROUNDED,
-            show_header=True,
-            header_style="bold cyan"
-        )
-        integrated_table.add_column("Indicador", style="yellow", width=40)
-        integrated_table.add_column("Valor", justify="right", style="green")
+        # Indicadores Integrados (se disponível)
+        if integrated:
+            integrated_table = Table(
+                title="🎯 Indicadores Integrados",
+                box=box.ROUNDED,
+                show_header=True,
+                header_style="bold cyan"
+            )
+            integrated_table.add_column("Indicador", style="yellow", width=40)
+            integrated_table.add_column("Valor", justify="right", style="green")
 
-        integrated_table.add_row("Linhas por Commit", f"{integrated.lines_per_commit:.1f}")
-        integrated_table.add_row("Commits p/ Recriar Codebase", f"{integrated.commits_needed_to_rebuild:.0f}")
-        integrated_table.add_row("Commits por Mês", f"{integrated.commits_per_month:.1f}")
-        integrated_table.add_row("Velocidade Real (linhas/dia)", f"{integrated.actual_velocity:.1f}")
-        integrated_table.add_row("Velocidade COCOMO (linhas/dia)", f"{integrated.estimated_velocity:.1f}")
-        integrated_table.add_row("Razão Velocidade (real/estimado)", f"{integrated.velocity_ratio:.2f}x")
-        integrated_table.add_row("Eficiência de Commit", f"{integrated.commit_efficiency:.1f}%")
-        integrated_table.add_row("% Mudança Média/Commit", f"{integrated.change_percentage_per_commit:.2f}%")
+            integrated_table.add_row("Linhas por Commit", f"{integrated.lines_per_commit:.1f}")
+            integrated_table.add_row("Commits p/ Recriar Codebase", f"{integrated.commits_needed_to_rebuild:.0f}")
+            integrated_table.add_row("Commits por Mês", f"{integrated.commits_per_month:.1f}")
+            integrated_table.add_row("Velocidade Real (linhas/dia)", f"{integrated.actual_velocity:.1f}")
+            integrated_table.add_row("Velocidade COCOMO (linhas/dia)", f"{integrated.estimated_velocity:.1f}")
+            integrated_table.add_row("Razão Velocidade (real/estimado)", f"{integrated.velocity_ratio:.2f}x")
+            integrated_table.add_row("Eficiência de Commit", f"{integrated.commit_efficiency:.1f}%")
+            integrated_table.add_row("% Mudança Média/Commit", f"{integrated.change_percentage_per_commit:.2f}%")
 
-        self.console.print("\n")
-        self.console.print(integrated_table)
+            self.console.print("\n")
+            self.console.print(integrated_table)
 
-        # Score de Produtividade
-        score_color = "green" if integrated.developer_productivity_score >= 75 else \
-                      "yellow" if integrated.developer_productivity_score >= 50 else "red"
+            # Score de Produtividade
+            score_color = "green" if integrated.developer_productivity_score >= 75 else \
+                          "yellow" if integrated.developer_productivity_score >= 50 else "red"
 
-        score_panel = Panel(
-            f"[bold {score_color}]{integrated.developer_productivity_score:.1f}/100[/bold {score_color}]\n\n"
-            f"[dim]Score baseado em velocidade, eficiência e complexidade[/dim]",
-            title="⭐ Score de Produtividade dos Desenvolvedores",
-            box=box.DOUBLE,
-            style=f"bold {score_color}"
-        )
-        self.console.print("\n")
-        self.console.print(score_panel)
+            score_panel = Panel(
+                f"[bold {score_color}]{integrated.developer_productivity_score:.1f}/100[/bold {score_color}]\n\n"
+                f"[dim]Score baseado em velocidade, eficiência e complexidade[/dim]",
+                title="⭐ Score de Produtividade dos Desenvolvedores",
+                box=box.DOUBLE,
+                style=f"bold {score_color}"
+            )
+            self.console.print("\n")
+            self.console.print(score_panel)
 
-        # Insights
-        self.console.print("\n")
-        insights = Panel(
-            self._generate_insights(integrated, git),
-            title="💡 Insights e Recomendações",
-            box=box.ROUNDED,
-            style="cyan"
-        )
-        self.console.print(insights)
+            # Insights
+            if git:
+                self.console.print("\n")
+                insights = Panel(
+                    self._generate_insights(integrated, git),
+                    title="💡 Insights e Recomendações",
+                    box=box.ROUNDED,
+                    style="cyan"
+                )
+                self.console.print(insights)
 
         # Análise de Segurança
         if security:
@@ -541,50 +442,16 @@ class IntegratedAnalyzer:
                     self.console.print(files_table)
 
     def _generate_insights(self, integrated: IntegratedMetrics, git: GitMetrics) -> str:
-        """Gera insights baseados nas métricas integradas"""
-        insights = []
+        """
+        Gera insights baseados nas métricas integradas.
 
-        # Análise de velocidade
-        if integrated.velocity_ratio > 1.2:
-            insights.append("🚀 Velocidade acima do esperado - Equipe muito produtiva!")
-        elif integrated.velocity_ratio > 0.8:
-            insights.append("✓ Velocidade dentro do esperado")
-        else:
-            insights.append("⚠️  Velocidade abaixo do esperado - Revisar impedimentos")
-
-        # Análise de eficiência
-        if integrated.commit_efficiency > 50:
-            insights.append("✓ Alta eficiência de commits - Baixo retrabalho")
-        elif integrated.commit_efficiency > 30:
-            insights.append("⚡ Eficiência moderada - Algum retrabalho presente")
-        else:
-            insights.append("⚠️  Baixa eficiência - Alto retrabalho (churn)")
-
-        # Análise de mudança por commit
-        if integrated.change_percentage_per_commit < 1:
-            insights.append("✓ Commits pequenos e incrementais - Boa prática")
-        elif integrated.change_percentage_per_commit < 5:
-            insights.append("⚡ Tamanho de commit moderado")
-        else:
-            insights.append("⚠️  Commits muito grandes - Considere commits menores")
-
-        # Análise de frequência
-        if integrated.commits_per_month > 40:
-            insights.append("✓ Alta frequência de commits - Desenvolvimento ativo")
-        elif integrated.commits_per_month > 20:
-            insights.append("⚡ Frequência moderada de commits")
-        else:
-            insights.append("📊 Baixa frequência de commits")
-
-        # Análise de score
-        if integrated.developer_productivity_score >= 75:
-            insights.append("🌟 Excelente produtividade da equipe!")
-        elif integrated.developer_productivity_score >= 50:
-            insights.append("👍 Boa produtividade geral")
-        else:
-            insights.append("📈 Oportunidade de melhoria na produtividade")
-
-        return "\n".join(insights)
+        Deprecated: Use InsightsService diretamente.
+        Mantido para compatibilidade.
+        """
+        from services.insights_service import InsightsService
+        insights_service = InsightsService()
+        insights = insights_service.generate_integrated_insights(integrated, git)
+        return insights_service.format_insights(insights)
 
     def export_json(
         self,

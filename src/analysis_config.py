@@ -6,6 +6,37 @@ from importlib import import_module
 from typing import Iterable, List, Sequence, Tuple, Any
 
 
+# ========== CONFIGURAÇÕES DE CUSTO ==========
+DEFAULT_MONTHLY_SALARY_BRL = 15000.0  # Salário padrão mensal em BRL por pessoa
+
+# ========== PESOS DE SEVERIDADE (SECURITY SCORE) ==========
+SECURITY_SEVERITY_WEIGHTS = {
+    'critical': 10,  # Vulnerabilidades críticas têm peso máximo
+    'high': 5,       # Vulnerabilidades altas têm peso alto
+    'medium': 2,     # Vulnerabilidades médias têm peso moderado
+    'low': 1,        # Vulnerabilidades baixas têm peso mínimo
+    'info': 0,       # Informativas não impactam score
+}
+
+# ========== MAPEAMENTO DE SEVERIDADE SEMGREP ==========
+SEMGREP_SEVERITY_MAP = {
+    'ERROR': 'CRITICAL',
+    'WARNING': 'HIGH',
+    'INFO': 'INFO',
+}
+
+# ========== PERCENTUAIS COCOMO II ==========
+MAINTENANCE_TEAM_PERCENTAGE = 0.18  # 18% da equipe de desenvolvimento
+EXPANSION_TEAM_PERCENTAGE = 0.30    # 30% da equipe de desenvolvimento
+WORKING_DAYS_PER_MONTH = 22         # ~22 dias úteis por mês
+
+# ========== TIMEOUTS E LIMITES ==========
+SEMGREP_TIMEOUT_SECONDS = 300       # 5 minutos
+SEMGREP_FILE_TIMEOUT_SECONDS = 60   # 1 minuto por arquivo
+SEMGREP_MAX_FILE_SIZE_MB = 5        # 5 MB por arquivo
+DEFAULT_MAX_SECURITY_FINDINGS = 500 # Máximo de descobertas a processar
+
+
 DEFAULT_EXCLUDE_PATTERNS: List[str] = [
     ".git/",
     ".svn/",

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 
 
 @dataclass
@@ -106,3 +106,59 @@ class AnalysisBundle:
     cocomo: CocomoResults
     git: Optional[GitMetrics]
     integrated: Optional[IntegratedMetrics]
+
+
+@dataclass
+class SecurityFinding:
+    """Representa uma descoberta de segurança do Semgrep"""
+
+    rule_id: str
+    severity: str  # CRITICAL, HIGH, MEDIUM, LOW, INFO
+    category: str  # security, best-practice, performance, etc
+    message: str
+    file_path: str
+    line: int
+    code_snippet: str = ""
+    cwe: Optional[str] = None
+    owasp: Optional[str] = None
+    confidence: str = "HIGH"  # HIGH, MEDIUM, LOW
+
+    def to_dict(self) -> Dict:
+        return asdict(self)
+
+
+@dataclass
+class SecurityMetrics:
+    """Métricas agregadas de segurança"""
+
+    total_findings: int = 0
+    critical_findings: int = 0
+    high_findings: int = 0
+    medium_findings: int = 0
+    low_findings: int = 0
+    info_findings: int = 0
+
+    # Por categoria
+    security_issues: int = 0
+    best_practice_issues: int = 0
+    performance_issues: int = 0
+
+    # Por tipo CWE/OWASP
+    cwe_categories: Dict[str, int] = field(default_factory=dict)
+    owasp_categories: Dict[str, int] = field(default_factory=dict)
+
+    # Arquivos mais problemáticos
+    files_with_issues: Dict[str, int] = field(default_factory=dict)
+
+    # Lista de descobertas
+    findings: List[SecurityFinding] = field(default_factory=list)
+
+    scan_duration_seconds: float = 0.0
+    rules_used: int = 0
+    files_scanned: int = 0
+    scan_timestamp: str = ""
+
+    def to_dict(self) -> Dict:
+        data = asdict(self)
+        data['findings'] = [f.to_dict() for f in self.findings]
+        return data
