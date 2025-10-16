@@ -45,3 +45,6 @@ uv.lock
 # Reports
 reports/
 *.json
+
+# Environment variables
+.env
