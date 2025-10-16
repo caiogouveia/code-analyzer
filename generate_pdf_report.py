@@ -561,7 +561,201 @@ def generate_pdf_report(json_file_path, output_pdf_path=None, include_ai_insight
 
     elements.append(PageBreak())
 
+    # ========== ANÁLISE DE SEGURANÇA ==========
+    if 'security' in data and data['security']:
+        elements.append(PageBreak())
+        elements.append(Paragraph("<b>ANÁLISE DE SEGURANÇA</b>", heading_style))
+        elements.append(Spacer(1, 0.3*cm))
+
+        security = data['security']
+
+        security_intro_text = """
+        Esta seção apresenta os resultados da análise de segurança realizada com Semgrep,
+        uma ferramenta de análise estática que identifica vulnerabilidades, bad practices e
+        problemas de segurança no código-fonte.
+        """
+        elements.append(Paragraph(security_intro_text, body_style))
+        elements.append(Spacer(1, 0.5*cm))
+
+        # Calcula o score de segurança
+        def calculate_security_score(sec_data):
+            total_findings = sec_data.get('total_findings', 0)
+            if total_findings == 0:
+                return 100.0
+
+            critical_weight = 10
+            high_weight = 5
+            medium_weight = 2
+            low_weight = 1
+
+            negative_score = (
+                sec_data.get('critical_findings', 0) * critical_weight +
+                sec_data.get('high_findings', 0) * high_weight +
+                sec_data.get('medium_findings', 0) * medium_weight +
+                sec_data.get('low_findings', 0) * low_weight
+            )
+
+            import math
+            if negative_score == 0:
+                return 100.0
+
+            score = max(0, 100 - (math.log1p(negative_score) * 10))
+            return round(score, 2)
+
+        security_score = calculate_security_score(security)
+        score_color = COLORS['success'] if security_score >= 80 else \
+                      COLORS['warning'] if security_score >= 60 else COLORS['danger']
+
+        # Box de score de segurança
+        score_box = Table([[
+            Paragraph(f"<b>Score de Segurança</b>",
+                     ParagraphStyle('ScoreLabel', fontSize=12, textColor=COLORS['white'], alignment=TA_CENTER)),
+        ], [
+            Paragraph(f"<b><font size=24>{security_score:.1f}/100</font></b>",
+                     ParagraphStyle('ScoreValue', fontSize=24, textColor=COLORS['white'], alignment=TA_CENTER)),
+        ]], colWidths=[8*cm])
+        score_box.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), score_color),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, -1), 15),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 15),
+            ('ROUNDEDCORNERS', [10, 10, 10, 10]),
+        ]))
+        elements.append(score_box)
+        elements.append(Spacer(1, 0.5*cm))
+
+        # Resumo de descobertas
+        security_summary_data = [
+            ['Total de Descobertas', format_number(security.get('total_findings', 0), 0)],
+            ['Críticas', format_number(security.get('critical_findings', 0), 0)],
+            ['Altas', format_number(security.get('high_findings', 0), 0)],
+            ['Médias', format_number(security.get('medium_findings', 0), 0)],
+            ['Baixas', format_number(security.get('low_findings', 0), 0)],
+            ['Informativas', format_number(security.get('info_findings', 0), 0)],
+            ['', ''],
+            ['Problemas de Segurança', format_number(security.get('security_issues', 0), 0)],
+            ['Best Practices', format_number(security.get('best_practice_issues', 0), 0)],
+            ['Performance', format_number(security.get('performance_issues', 0), 0)],
+            ['', ''],
+            ['Arquivos Escaneados', format_number(security.get('files_scanned', 0), 0)],
+            ['Tempo de Scan', f"{security.get('scan_duration_seconds', 0):.2f}s"],
+        ]
+
+        elements.append(create_info_table(security_summary_data, 'Resumo da Análise de Segurança'))
+        elements.append(Spacer(1, 0.5*cm))
+
+        # Gráfico de distribuição de severidade
+        if security.get('total_findings', 0) > 0:
+            severity_labels = []
+            severity_values = []
+
+            if security.get('critical_findings', 0) > 0:
+                severity_labels.append('Críticas')
+                severity_values.append(security['critical_findings'])
+            if security.get('high_findings', 0) > 0:
+                severity_labels.append('Altas')
+                severity_values.append(security['high_findings'])
+            if security.get('medium_findings', 0) > 0:
+                severity_labels.append('Médias')
+                severity_values.append(security['medium_findings'])
+            if security.get('low_findings', 0) > 0:
+                severity_labels.append('Baixas')
+                severity_values.append(security['low_findings'])
+            if security.get('info_findings', 0) > 0:
+                severity_labels.append('Info')
+                severity_values.append(security['info_findings'])
+
+            if severity_labels:
+                img_buffer = create_matplotlib_chart(
+                    None, 'pie',
+                    'Distribuição de Descobertas por Severidade',
+                    severity_labels,
+                    severity_values
+                )
+                elements.append(Image(img_buffer, width=12*cm, height=8*cm))
+                elements.append(Spacer(1, 0.5*cm))
+
+        # Top arquivos vulneráveis
+        if security.get('files_with_issues'):
+            files_with_issues = security['files_with_issues']
+            sorted_files = sorted(files_with_issues.items(), key=lambda x: x[1], reverse=True)[:10]
+
+            if sorted_files:
+                elements.append(Paragraph("<b>Top 10 Arquivos Mais Vulneráveis</b>",
+                                         ParagraphStyle('SubHeading', fontSize=12, textColor=COLORS['primary'], spaceAfter=10)))
+
+                files_data = []
+                for file_path, count in sorted_files:
+                    # Encurta o caminho se necessário
+                    display_path = file_path if len(file_path) <= 60 else "..." + file_path[-57:]
+                    files_data.append([display_path, str(count)])
+
+                files_table = Table(files_data, colWidths=[12*cm, 4*cm])
+                files_table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, -1), COLORS['light']),
+                    ('TEXTCOLOR', (0, 0), (-1, -1), COLORS['text']),
+                    ('ALIGN', (0, 0), (0, -1), 'LEFT'),
+                    ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
+                    ('FONTNAME', (1, 0), (1, -1), 'Helvetica-Bold'),
+                    ('FONTSIZE', (0, 0), (-1, -1), 8),
+                    ('TOPPADDING', (0, 0), (-1, -1), 6),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+                    ('GRID', (0, 0), (-1, -1), 0.5, COLORS['primary']),
+                    ('ROWBACKGROUNDS', (0, 0), (-1, -1), [COLORS['white'], COLORS['light']]),
+                ]))
+                elements.append(files_table)
+                elements.append(Spacer(1, 0.5*cm))
+
+        # Principais descobertas
+        if 'findings' in security and security['findings']:
+            findings = security['findings']
+            # Filtra apenas críticas e altas
+            critical_high = [f for f in findings if f.get('severity') in ['CRITICAL', 'HIGH']][:5]
+
+            if critical_high:
+                elements.append(Paragraph("<b>Principais Descobertas (Críticas/Altas)</b>",
+                                         ParagraphStyle('SubHeading', fontSize=12, textColor=COLORS['danger'], spaceAfter=10)))
+
+                for idx, finding in enumerate(critical_high, 1):
+                    severity = finding.get('severity', 'UNKNOWN')
+                    rule_id = finding.get('rule_id', 'unknown')
+                    message = finding.get('message', 'No message')
+                    file_path = finding.get('file_path', '')
+                    line = finding.get('line', 0)
+
+                    # Encurta a mensagem se muito longa
+                    if len(message) > 150:
+                        message = message[:147] + "..."
+
+                    # Encurta o caminho
+                    if len(file_path) > 70:
+                        file_path = "..." + file_path[-67:]
+
+                    finding_text = f"""
+                    <b>{idx}. [{severity}] {rule_id}</b><br/>
+                    <i>Arquivo:</i> {file_path}:{line}<br/>
+                    <i>Mensagem:</i> {message}
+                    """
+
+                    elements.append(Paragraph(finding_text, body_style))
+                    elements.append(Spacer(1, 0.3*cm))
+
+        # Recomendações de segurança
+        recommendations_text = """
+        <b>Recomendações de Segurança:</b><br/><br/>
+        • Priorize a correção de problemas CRÍTICOS e ALTOS imediatamente<br/>
+        • Revise os arquivos mais vulneráveis identificados acima<br/>
+        • Implemente testes de segurança automatizados no pipeline CI/CD<br/>
+        • Realize revisões de código com foco em segurança<br/>
+        • Mantenha dependências atualizadas para evitar vulnerabilidades conhecidas<br/>
+        • Considere treinamento em segurança para a equipe de desenvolvimento
+        """
+        elements.append(Spacer(1, 0.5*cm))
+        elements.append(Paragraph(recommendations_text, body_style))
+
     # ========== ANÁLISE INTEGRADA ==========
+    elements.append(PageBreak())
     elements.append(Paragraph("<b>ANÁLISE INTEGRADA</b>", heading_style))
     elements.append(Spacer(1, 0.3*cm))
 
@@ -664,6 +858,18 @@ def generate_pdf_report(json_file_path, output_pdf_path=None, include_ai_insight
     elements.append(Paragraph("<b>CONCLUSÃO</b>", heading_style))
     elements.append(Spacer(1, 0.3*cm))
 
+    # Informações de segurança na conclusão (se disponível)
+    security_conclusion = ""
+    if 'security' in data and data['security']:
+        security = data['security']
+        security_score = calculate_security_score(security)
+        security_status = "excelente" if security_score >= 80 else "bom" if security_score >= 60 else "necessita atenção"
+
+        security_conclusion = f"""
+        • Score de Segurança: {security_score:.1f}/100 ({security_status})<br/>
+        • Total de Descobertas de Segurança: {security.get('total_findings', 0)}<br/>
+        """
+
     conclusion_text = f"""
     O projeto <b>{data['project_name']}</b> demonstra indicadores positivos de desenvolvimento:
     <br/><br/>
@@ -672,6 +878,7 @@ def generate_pdf_report(json_file_path, output_pdf_path=None, include_ai_insight
     • Eficiência de commits de {format_number(integrated['commit_efficiency'] * 100, 2)}%<br/>
     • Velocidade de desenvolvimento {format_number(integrated['velocity_ratio'], 2)}x acima do estimado<br/>
     • Complexidade classificada como {cocomo['complexity_level']}<br/>
+    {security_conclusion}
     <br/>
     <b>Estimativas Finais:</b><br/>
     • Custo Total: R$ {format_number(cocomo['cost_estimate_brl'], 2)}<br/>
@@ -680,7 +887,7 @@ def generate_pdf_report(json_file_path, output_pdf_path=None, include_ai_insight
     • Manutenção: {format_number(cocomo['maintenance_people'], 1)} desenvolvedores<br/>
     <br/>
     Este relatório fornece uma base sólida para tomada de decisões estratégicas sobre
-    alocação de recursos, planejamento de releases e estimativas de custos do projeto.
+    alocação de recursos, planejamento de releases, estimativas de custos e segurança do projeto.
     """
 
     elements.append(Paragraph(conclusion_text, body_style))

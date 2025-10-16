@@ -23,6 +23,8 @@ from rich.text import Text
 
 # Importa o analisador COCOMO
 from main import CodeAnalyzer, CocomoResults
+# Importa o analisador de segurança
+from security_analyzer import SecurityAnalyzer, SecurityMetrics
 
 
 @dataclass
@@ -232,12 +234,18 @@ class IntegratedAnalyzer:
         self.repo_path = repo_path
         self.console = Console()
 
-    def analyze(self, avg_salary_month_brl: float = 15000.0) -> tuple[CocomoResults, GitMetrics, IntegratedMetrics]:
+    def analyze(self, avg_salary_month_brl: float = 15000.0,
+                run_security_analysis: bool = True,
+                security_config: str = "auto") -> tuple[CocomoResults, GitMetrics, IntegratedMetrics, Optional[SecurityMetrics]]:
         """Executa análise completa
 
         Args:
             avg_salary_month_brl: Salário médio mensal em BRL por pessoa (padrão: R$15.000)
+            run_security_analysis: Se True, executa análise de segurança com Semgrep (padrão: True)
+            security_config: Configuração do Semgrep (padrão: 'auto')
         """
+
+        security_metrics = None
 
         with Progress(
             SpinnerColumn(),
@@ -263,6 +271,17 @@ class IntegratedAnalyzer:
             git_metrics = git_analyzer.calculate_metrics(commits)
             progress.update(task2, completed=True)
 
+            # Análise de Segurança
+            if run_security_analysis:
+                task4 = progress.add_task("[cyan]Analisando segurança (Semgrep)...", total=None)
+                try:
+                    security_analyzer = SecurityAnalyzer(self.repo_path)
+                    security_metrics = security_analyzer.analyze(config=security_config)
+                    progress.update(task4, completed=True)
+                except Exception as e:
+                    progress.update(task4, completed=True)
+                    self.console.print(f"[yellow]⚠ Aviso: Análise de segurança falhou: {e}[/yellow]")
+
             # Cálculo de métricas integradas
             task3 = progress.add_task("[cyan]Calculando indicadores integrados...", total=None)
             integrated = self._calculate_integrated_metrics(
@@ -272,7 +291,7 @@ class IntegratedAnalyzer:
             )
             progress.update(task3, completed=True)
 
-        return cocomo_results, git_metrics, integrated
+        return cocomo_results, git_metrics, integrated, security_metrics
 
     def _calculate_integrated_metrics(
         self,
@@ -340,12 +359,14 @@ class IntegratedAnalyzer:
         self,
         cocomo: CocomoResults,
         git: GitMetrics,
-        integrated: IntegratedMetrics
+        integrated: IntegratedMetrics,
+        security: Optional[SecurityMetrics] = None
     ):
         """Exibe resultados da análise integrada"""
 
         # Título
-        title = Text("ANÁLISE INTEGRADA: COCOMO II + GIT", style="bold magenta")
+        title_text = "ANÁLISE INTEGRADA: COCOMO II + GIT + SEGURANÇA" if security else "ANÁLISE INTEGRADA: COCOMO II + GIT"
+        title = Text(title_text, style="bold magenta")
         self.console.print("\n")
         self.console.print(Panel(title, box=box.DOUBLE, expand=False))
 
@@ -462,6 +483,63 @@ class IntegratedAnalyzer:
         )
         self.console.print(insights)
 
+        # Análise de Segurança
+        if security:
+            self.console.print("\n")
+            security_table = Table(
+                title="🔒 Análise de Segurança (Semgrep)",
+                box=box.ROUNDED,
+                show_header=True,
+                header_style="bold cyan"
+            )
+            security_table.add_column("Métrica", style="yellow", width=30)
+            security_table.add_column("Valor", justify="right", style="green")
+
+            from security_analyzer import SecurityAnalyzer
+            sa = SecurityAnalyzer(self.repo_path)
+            sa.metrics = security
+            score = sa.get_security_score()
+
+            score_color = "green" if score >= 80 else "yellow" if score >= 60 else "red"
+
+            security_table.add_row("Score de Segurança", f"[{score_color}]{score:.1f}/100[/{score_color}]")
+            security_table.add_row("Total de Descobertas", f"{security.total_findings:,}")
+            security_table.add_row("Críticas", f"[red]{security.critical_findings}[/red]" if security.critical_findings > 0 else "0")
+            security_table.add_row("Altas", f"[orange1]{security.high_findings}[/orange1]" if security.high_findings > 0 else "0")
+            security_table.add_row("Médias", f"[yellow]{security.medium_findings}[/yellow]" if security.medium_findings > 0 else "0")
+            security_table.add_row("Baixas", f"{security.low_findings}")
+            security_table.add_row("Informativas", f"{security.info_findings}")
+            security_table.add_row("", "")
+            security_table.add_row("Problemas de Segurança", f"{security.security_issues}")
+            security_table.add_row("Best Practices", f"{security.best_practice_issues}")
+            security_table.add_row("Performance", f"{security.performance_issues}")
+            security_table.add_row("", "")
+            security_table.add_row("Arquivos Escaneados", f"{security.files_scanned:,}")
+            security_table.add_row("Tempo de Scan", f"{security.scan_duration_seconds:.2f}s")
+
+            self.console.print(security_table)
+
+            # Top arquivos vulneráveis
+            if security.files_with_issues:
+                top_files = sa.get_top_vulnerable_files(5)
+                if top_files:
+                    files_table = Table(
+                        title="📁 Top 5 Arquivos Mais Vulneráveis",
+                        box=box.ROUNDED,
+                        show_header=True,
+                        header_style="bold cyan"
+                    )
+                    files_table.add_column("Arquivo", style="yellow", width=50)
+                    files_table.add_column("Problemas", justify="right", style="red")
+
+                    for file_path, count in top_files:
+                        # Encurta o caminho para exibição
+                        display_path = file_path if len(file_path) <= 50 else "..." + file_path[-47:]
+                        files_table.add_row(display_path, str(count))
+
+                    self.console.print("\n")
+                    self.console.print(files_table)
+
     def _generate_insights(self, integrated: IntegratedMetrics, git: GitMetrics) -> str:
         """Gera insights baseados nas métricas integradas"""
         insights = []
@@ -513,15 +591,22 @@ class IntegratedAnalyzer:
         cocomo: CocomoResults,
         git: GitMetrics,
         integrated: IntegratedMetrics,
-        output_path: Path
+        output_path: Path,
+        security: Optional[SecurityMetrics] = None
     ):
         """Exporta resultados para JSON"""
         data = {
+            'project_name': self.repo_path.name,
+            'project_path': str(self.repo_path),
+            'analysis_type': 'integrated',
             'cocomo': asdict(cocomo),
             'git': git.to_dict(),
             'integrated': asdict(integrated),
             'generated_at': datetime.now().isoformat()
         }
+
+        if security:
+            data['security'] = security.to_dict()
 
         with open(output_path, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
@@ -563,15 +648,15 @@ def main():
     try:
         # Executa análise integrada
         analyzer = IntegratedAnalyzer(path)
-        cocomo_results, git_metrics, integrated_metrics = analyzer.analyze()
+        cocomo_results, git_metrics, integrated_metrics, security_metrics = analyzer.analyze()
 
         # Exibe resultados
-        analyzer.display_results(cocomo_results, git_metrics, integrated_metrics)
+        analyzer.display_results(cocomo_results, git_metrics, integrated_metrics, security_metrics)
 
         # Exporta se solicitado
         if args.export:
             export_path = Path(args.export)
-            analyzer.export_json(cocomo_results, git_metrics, integrated_metrics, export_path)
+            analyzer.export_json(cocomo_results, git_metrics, integrated_metrics, export_path, security_metrics)
 
     except ValueError as e:
         Console().print(f"[bold red]Erro:[/bold red] {e}")

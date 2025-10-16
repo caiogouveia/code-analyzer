@@ -29,6 +29,7 @@ from textual import on
 from main import CodeAnalyzer, CocomoResults
 from git_analyzer import GitAnalyzer, GitMetrics, IntegratedAnalyzer, IntegratedMetrics
 from generate_pdf_report import generate_pdf_report
+from security_analyzer import SecurityAnalyzer, SecurityMetrics, SecurityFinding
 
 load_dotenv()  # Carrega variáveis de ambiente do .env
 
@@ -505,7 +506,7 @@ class ErrorScreen(Screen):
         with Container(id="error-container"):
             yield Static("❌ ERRO", id="error-title")
             yield Static(self.message, id="error-message")
-            yield Static("\nPressione ESC ou ENTER para voltar", id="error-message")
+            yield Static("\nPressione ESC ou ENTER para voltar", id="error-hint")
 
 
 class CocomoIIAnalyzerApp(App):
@@ -557,6 +558,17 @@ class CocomoIIAnalyzerApp(App):
         margin: 1 0;
     }
 
+    #analysis-progress {
+        display: none;
+        margin: 1 2;
+    }
+
+    #progress-label {
+        display: none;
+        text-align: center;
+        margin-top: 1;
+    }
+
     .info-text {
         margin: 1 0;
         color: $text;
@@ -581,6 +593,7 @@ class CocomoIIAnalyzerApp(App):
         self.cocomo_results: Optional[CocomoResults] = None
         self.git_metrics: Optional[GitMetrics] = None
         self.integrated_metrics: Optional[IntegratedMetrics] = None
+        self.security_metrics: Optional[SecurityMetrics] = None
         self.code_analyzer: Optional[CodeAnalyzer] = None
         self.ai_insights_generated: bool = False
         self.ai_insights_data: Optional[dict] = None
@@ -590,6 +603,10 @@ class CocomoIIAnalyzerApp(App):
         yield Header()
 
         with Container(id="main-container"):
+            # Barra de progresso global (inicialmente oculta)
+            yield Static("", id="progress-label", classes="status-text")
+            yield ProgressBar(id="analysis-progress", total=100, show_eta=False)
+
             with TabbedContent(initial="tab-welcome"):
                 with TabPane("🏠 Início", id="tab-welcome"):
                     yield Static("Bem-vindo ao COCOMO II + Git Analyzer!", classes="section-title")
@@ -619,6 +636,28 @@ class CocomoIIAnalyzerApp(App):
                     yield Static("\n💡 Insights e Recomendações", classes="section-title")
                     yield Static("", id="insights-text", classes="info-text")
                     yield Static("Aguardando análise...", id="integrated-status", classes="status-text")
+
+                with TabPane("🔒 Segurança", id="tab-security"):
+                    yield Static("Análise de Segurança (Semgrep)", classes="section-title")
+                    yield Static(
+                        "Análise automatizada de vulnerabilidades e problemas de segurança no código.\n"
+                        "Requer o Semgrep instalado no sistema.",
+                        classes="info-text"
+                    )
+
+                    with Horizontal(classes="action-buttons"):
+                        yield Button("🔍 Executar Análise de Segurança", variant="primary", id="btn-run-security")
+
+                    yield Static("", id="security-status", classes="status-text")
+
+                    yield Static("\n📊 Métricas de Segurança", classes="section-title")
+                    yield DataTable(id="security-metrics-table", classes="metrics-table")
+
+                    yield Static("\n⚠️ Top 10 Arquivos com Problemas", classes="section-title")
+                    yield DataTable(id="vulnerable-files-table", classes="metrics-table")
+
+                    yield Static("\n🚨 Descobertas Críticas e Altas", classes="section-title")
+                    yield DataTable(id="critical-findings-table", classes="metrics-table")
 
                 with TabPane("🤖 Insights IA", id="tab-ai-insights"):
                     yield Static("Insights Gerados por Inteligência Artificial", classes="section-title")
@@ -680,6 +719,19 @@ class CocomoIIAnalyzerApp(App):
         integrated_table.add_columns("Indicador", "Valor")
         integrated_table.cursor_type = "row"
 
+        # Tabelas de segurança
+        security_metrics_table = self.query_one("#security-metrics-table", DataTable)
+        security_metrics_table.add_columns("Métrica", "Valor")
+        security_metrics_table.cursor_type = "row"
+
+        vulnerable_files_table = self.query_one("#vulnerable-files-table", DataTable)
+        vulnerable_files_table.add_columns("Arquivo", "Problemas")
+        vulnerable_files_table.cursor_type = "row"
+
+        critical_findings_table = self.query_one("#critical-findings-table", DataTable)
+        critical_findings_table.add_columns("Severidade", "Arquivo", "Linha", "Mensagem")
+        critical_findings_table.cursor_type = "row"
+
     @on(Button.Pressed, "#btn-new-analysis")
     def action_new_analysis(self) -> None:
         """Abre tela de nova análise"""
@@ -700,6 +752,14 @@ class CocomoIIAnalyzerApp(App):
         """Inicia a análise em background"""
         self.project_path = path
 
+        # Mostra a barra de progresso
+        progress_bar = self.query_one("#analysis-progress", ProgressBar)
+        progress_label = self.query_one("#progress-label", Static)
+        progress_bar.styles.display = "block"
+        progress_label.styles.display = "block"
+        progress_bar.update(progress=0)
+        progress_label.update("🔍 Iniciando análise...")
+
         # Atualiza status
         self.query_one("#cocomo-status", Static).update("⏳ Analisando código...")
         self.query_one("#git-status", Static).update("⏳ Analisando repositório Git...")
@@ -712,23 +772,63 @@ class CocomoIIAnalyzerApp(App):
     def perform_analysis(self, path: Path) -> None:
         """Executa a análise em background"""
         try:
-            # Análise integrada
+            # Etapa 1: Análise COCOMO (0-40%)
+            self.call_from_thread(self.update_progress, 10, "📊 Analisando código-fonte...")
+
+            self.code_analyzer = CodeAnalyzer(path)
+            self.code_analyzer.analyze_directory()
+
+            self.call_from_thread(self.update_progress, 30, "📊 Calculando métricas COCOMO...")
+
+            # Etapa 2: Análise Git (40-70%)
+            self.call_from_thread(self.update_progress, 45, "📈 Analisando repositório Git...")
+
             analyzer = IntegratedAnalyzer(path)
-            cocomo, git, integrated = analyzer.analyze(self.custom_salary)
+            cocomo, git, integrated, security = analyzer.analyze(
+                self.custom_salary,
+                run_security_analysis=False  # Desativa análise de segurança no TUI por enquanto
+            )
+
+            self.call_from_thread(self.update_progress, 70, "📈 Processando histórico de commits...")
 
             self.cocomo_results = cocomo
             self.git_metrics = git
+
+            # Etapa 3: Métricas Integradas (70-95%)
+            self.call_from_thread(self.update_progress, 85, "🎯 Calculando métricas integradas...")
+
             self.integrated_metrics = integrated
 
-            # Guarda o code_analyzer para acessar métricas detalhadas
-            self.code_analyzer = CodeAnalyzer(path)
-            self.code_analyzer.analyze_directory()
+            self.call_from_thread(self.update_progress, 95, "✨ Finalizando análise...")
 
             # Atualiza a UI
             self.call_from_thread(self.update_results)
 
+            # Completa o progresso
+            self.call_from_thread(self.update_progress, 100, "✅ Análise concluída!")
+
         except Exception as e:
             self.call_from_thread(self.show_error, str(e))
+
+    def update_progress(self, progress: int, message: str) -> None:
+        """Atualiza a barra de progresso"""
+        progress_bar = self.query_one("#analysis-progress", ProgressBar)
+        progress_label = self.query_one("#progress-label", Static)
+
+        progress_bar.update(progress=progress)
+        progress_label.update(message)
+
+        # Esconde a barra quando completa
+        if progress >= 100:
+            # Aguarda um pouco para o usuário ver a conclusão
+            self.set_timer(2.0, self.hide_progress_bar)
+
+    def hide_progress_bar(self) -> None:
+        """Esconde a barra de progresso"""
+        progress_bar = self.query_one("#analysis-progress", ProgressBar)
+        progress_label = self.query_one("#progress-label", Static)
+        progress_bar.styles.display = "none"
+        progress_label.styles.display = "none"
 
     def update_results(self) -> None:
         """Atualiza os resultados na UI"""
@@ -918,6 +1018,11 @@ class CocomoIIAnalyzerApp(App):
             if self.ai_insights_generated and self.ai_insights_data:
                 data['ai_insights'] = self.ai_insights_data
 
+            # Inclui análise de segurança se foi executada
+            if self.security_metrics:
+                data['security'] = self.security_metrics.to_dict()
+                data['security_score'] = self.get_security_score(self.security_metrics)
+
             with open(output_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
 
@@ -960,6 +1065,11 @@ class CocomoIIAnalyzerApp(App):
             if self.ai_insights_generated and self.ai_insights_data:
                 data['ai_insights'] = self.ai_insights_data
 
+            # Inclui análise de segurança se foi executada
+            if self.security_metrics:
+                data['security'] = self.security_metrics.to_dict()
+                data['security_score'] = self.get_security_score(self.security_metrics)
+
             with open(temp_json, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
 
@@ -978,6 +1088,9 @@ class CocomoIIAnalyzerApp(App):
 
     def show_error(self, message: str) -> None:
         """Mostra erro"""
+        # Esconde a barra de progresso
+        self.hide_progress_bar()
+
         self.push_screen(ErrorScreen(message))
         self.query_one("#cocomo-status", Static).update(f"❌ Erro: {message}")
         self.query_one("#git-status", Static).update(f"❌ Erro: {message}")
@@ -1060,6 +1173,146 @@ class CocomoIIAnalyzerApp(App):
         self.query_one("#ai-insights-content", Static).update(
             "[red]Não foi possível gerar insights. Verifique sua chave API e tente novamente.[/red]"
         )
+
+    @on(Button.Pressed, "#btn-run-security")
+    def action_run_security_analysis(self) -> None:
+        """Executa a análise de segurança"""
+        if not self.project_path:
+            self.query_one("#security-status", Static).update(
+                "❌ Execute uma análise do projeto primeiro!"
+            )
+            return
+
+        self.query_one("#security-status", Static).update("⏳ Executando análise de segurança...")
+
+        # Executa análise em worker
+        self.run_security_analysis_worker()
+
+    @work(thread=True)
+    def run_security_analysis_worker(self) -> None:
+        """Executa a análise de segurança em background"""
+        try:
+            analyzer = SecurityAnalyzer(self.project_path)
+
+            # Verifica se o Semgrep está disponível
+            if not analyzer.check_semgrep_available():
+                error_msg = "❌ Semgrep não está instalado. Instale com: pip install semgrep"
+                self.call_from_thread(self.show_security_error, error_msg)
+                return
+
+            # Executa a análise
+            metrics = analyzer.analyze(config='auto', max_findings=100)
+
+            self.call_from_thread(self.update_security_results, metrics)
+
+        except Exception as e:
+            error_msg = f"❌ Erro ao executar análise de segurança: {str(e)}"
+            self.call_from_thread(self.show_security_error, error_msg)
+
+    def update_security_results(self, metrics: SecurityMetrics) -> None:
+        """Atualiza os resultados da análise de segurança na UI"""
+        self.security_metrics = metrics
+
+        # Atualiza status
+        security_score = self.get_security_score(metrics)
+        self.query_one("#security-status", Static).update(
+            f"✅ Análise concluída! Score de Segurança: {security_score:.1f}/100"
+        )
+
+        # Atualiza tabela de métricas
+        metrics_table = self.query_one("#security-metrics-table", DataTable)
+        metrics_table.clear()
+
+        metrics_table.add_row("🎯 Score de Segurança", f"{security_score:.1f}/100")
+        metrics_table.add_row("", "")
+        metrics_table.add_row("Total de Descobertas", f"{metrics.total_findings:,}")
+        metrics_table.add_row("  • Críticas", f"{metrics.critical_findings}")
+        metrics_table.add_row("  • Altas", f"{metrics.high_findings}")
+        metrics_table.add_row("  • Médias", f"{metrics.medium_findings}")
+        metrics_table.add_row("  • Baixas", f"{metrics.low_findings}")
+        metrics_table.add_row("  • Informativas", f"{metrics.info_findings}")
+        metrics_table.add_row("", "")
+        metrics_table.add_row("Problemas de Segurança", f"{metrics.security_issues}")
+        metrics_table.add_row("Problemas de Best Practice", f"{metrics.best_practice_issues}")
+        metrics_table.add_row("Problemas de Performance", f"{metrics.performance_issues}")
+        metrics_table.add_row("", "")
+        metrics_table.add_row("Arquivos Escaneados", f"{metrics.files_scanned}")
+        metrics_table.add_row("Tempo de Scan", f"{metrics.scan_duration_seconds:.2f}s")
+
+        # Atualiza tabela de arquivos vulneráveis
+        vulnerable_files_table = self.query_one("#vulnerable-files-table", DataTable)
+        vulnerable_files_table.clear()
+
+        sorted_files = sorted(
+            metrics.files_with_issues.items(),
+            key=lambda x: x[1],
+            reverse=True
+        )[:10]
+
+        for file_path, count in sorted_files:
+            # Encurta o caminho se for muito longo
+            display_path = file_path
+            if len(display_path) > 60:
+                display_path = "..." + display_path[-57:]
+            vulnerable_files_table.add_row(display_path, f"{count}")
+
+        # Atualiza tabela de descobertas críticas e altas
+        critical_findings_table = self.query_one("#critical-findings-table", DataTable)
+        critical_findings_table.clear()
+
+        critical_and_high = [
+            f for f in metrics.findings
+            if f.severity in ['CRITICAL', 'HIGH']
+        ][:15]  # Limita a 15 descobertas
+
+        for finding in critical_and_high:
+            # Encurta o caminho do arquivo
+            display_path = finding.file_path
+            if len(display_path) > 40:
+                display_path = "..." + display_path[-37:]
+
+            # Encurta a mensagem
+            message = finding.message
+            if len(message) > 50:
+                message = message[:47] + "..."
+
+            critical_findings_table.add_row(
+                finding.severity,
+                display_path,
+                f"{finding.line}",
+                message
+            )
+
+    def get_security_score(self, metrics: SecurityMetrics) -> float:
+        """Calcula o score de segurança"""
+        if metrics.total_findings == 0:
+            return 100.0
+
+        # Pesos por severidade
+        critical_weight = 10
+        high_weight = 5
+        medium_weight = 2
+        low_weight = 1
+
+        # Calcula pontuação negativa
+        negative_score = (
+            metrics.critical_findings * critical_weight +
+            metrics.high_findings * high_weight +
+            metrics.medium_findings * medium_weight +
+            metrics.low_findings * low_weight
+        )
+
+        # Normaliza para 0-100
+        import math
+        if negative_score == 0:
+            return 100.0
+
+        score = max(0, 100 - (math.log1p(negative_score) * 10))
+        return round(score, 2)
+
+    def show_security_error(self, error_msg: str) -> None:
+        """Mostra erro na análise de segurança"""
+        self.query_one("#security-status", Static).update(error_msg)
 
 
 def main():

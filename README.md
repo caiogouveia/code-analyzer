@@ -22,7 +22,23 @@ Análise completa que cruza dados COCOMO II com histórico de commits Git.
 
 ## Funcionalidades
 
-### 🤖 Insights com Inteligência Artificial (NOVO!)
+### 🔒 Análise de Segurança com Semgrep (NOVO!)
+- **Análise estática de segurança**:
+  - Identificação automática de vulnerabilidades
+  - Detecção de bad practices e anti-patterns
+  - Score de segurança de 0-100
+  - Classificação por severidade (Crítica, Alta, Média, Baixa, Info)
+  - Categorização (Segurança, Best Practices, Performance)
+  - Identificação de arquivos mais vulneráveis
+  - Mapeamento de CWE (Common Weakness Enumeration)
+  - Compatibilidade com OWASP Top 10
+- Disponível via:
+  - Interface TUI (integrada automaticamente)
+  - Linha de comando (análise integrada)
+  - Relatórios PDF com seção dedicada de segurança
+  - Exportação JSON com métricas completas
+
+### 🤖 Insights com Inteligência Artificial
 - **Análise profunda com IA da OpenAI**:
   - Avaliação do valor do código e qualidade
   - Comparação com métricas de mercado
@@ -51,6 +67,25 @@ Análise completa que cruza dados COCOMO II com histórico de commits Git.
   - Produtividade (LOC/pessoa-mês)
   - Estimativa de custo em BRL
 - Saída formatada e elegante com Rich
+
+### Análise de Segurança (Semgrep)
+- **Análise Automática**:
+  - Detecção de vulnerabilidades conhecidas
+  - Análise de código-fonte estático
+  - Regras automáticas baseadas na linguagem
+  - Suporte para múltiplas linguagens
+
+- **Métricas de Segurança**:
+  - Total de descobertas por severidade
+  - Problemas de segurança vs best practices
+  - Arquivos mais vulneráveis
+  - Tempo de scan
+  - Score de segurança (0-100)
+
+- **Recomendações**:
+  - Priorização de correções
+  - Best practices de segurança
+  - Integração CI/CD sugerida
 
 ### Análise Integrada Git (git_analyzer.py)
 - **Métricas Git**:
@@ -162,7 +197,7 @@ uv run python main.py /caminho/para/projeto --ai-insights
 
 ### Análise Integrada Git + COCOMO II (Linha de Comando)
 
-#### Análise completa do diretório atual
+#### Análise completa do diretório atual (com segurança)
 ```bash
 uv run python git_analyzer.py
 ```
@@ -172,9 +207,18 @@ uv run python git_analyzer.py
 uv run python git_analyzer.py /caminho/para/repositorio
 ```
 
-#### Análise com exportação JSON
+#### Análise com exportação JSON (inclui dados de segurança)
 ```bash
 uv run python git_analyzer.py . --export resultados.json
+```
+
+#### Gerar relatório PDF com análise de segurança
+```bash
+# Primeiro, gere o JSON
+uv run python git_analyzer.py . --export relatorio.json
+
+# Depois, gere o PDF (inclui seção de segurança automaticamente)
+uv run python generate_pdf_report.py relatorio.json relatorio.pdf
 ```
 
 #### Ajuda e opções
@@ -234,7 +278,15 @@ O script gera relatórios expandidos com:
    - Ranking dos 10 principais autores
    - Número de commits e porcentagem
 
-4. **Indicadores Integrados**
+4. **Análise de Segurança (Semgrep)**
+   - Score de segurança (0-100)
+   - Total de descobertas por severidade
+   - Problemas críticos e de alta prioridade
+   - Top 5 arquivos mais vulneráveis
+   - Distribuição por categoria
+   - Tempo de scan e arquivos analisados
+
+5. **Indicadores Integrados**
    - Linhas por commit
    - Commits necessários para recriar
    - Commits por mês
@@ -243,11 +295,11 @@ O script gera relatórios expandidos com:
    - Eficiência de commit
    - % média de mudança por commit
 
-5. **Score de Produtividade**
+6. **Score de Produtividade**
    - Pontuação de 0-100
    - Baseado em velocidade, eficiência e complexidade
 
-6. **Insights Personalizados**
+7. **Insights Personalizados**
    - Avaliação de velocidade
    - Análise de eficiência
    - Recomendações de tamanho de commits
@@ -384,6 +436,18 @@ Estrutura do JSON:
     "change_percentage_per_commit": 1.5,
     "developer_productivity_score": 84.2
   },
+  "security": {
+    "total_findings": 15,
+    "critical_findings": 2,
+    "high_findings": 5,
+    "medium_findings": 6,
+    "low_findings": 2,
+    "security_issues": 7,
+    "best_practice_issues": 8,
+    "files_scanned": 125,
+    "scan_duration_seconds": 45.3,
+    "findings": [...]
+  },
   "generated_at": "2025-10-13T18:19:23.117434"
 }
 ```
@@ -398,6 +462,7 @@ Estrutura do JSON:
 - reportlab >= 4.0.0 (para geração de PDF)
 - matplotlib >= 3.8.0 (para gráficos)
 - openai >= 1.0.0 (para insights com IA - opcional)
+- semgrep >= 1.86.0 (para análise de segurança)
 
 ## Casos de Uso
 
@@ -428,7 +493,16 @@ Exporte os resultados em JSON para:
 - Integrar com ferramentas de BI
 - Gerar relatórios periódicos
 
-### 6. 🤖 Análise Estratégica com IA (NOVO!)
+### 6. 🔒 Análise de Segurança (NOVO!)
+Use a análise de segurança para:
+- Identificar vulnerabilidades antes da produção
+- Avaliar o score de segurança do projeto
+- Priorizar correções por severidade
+- Identificar arquivos mais críticos
+- Integrar análise de segurança no CI/CD
+- Gerar relatórios de segurança para compliance
+
+### 7. 🤖 Análise Estratégica com IA
 Use os insights de IA para:
 - Avaliar o valor de mercado do projeto
 - Obter recomendações estratégicas personalizadas
