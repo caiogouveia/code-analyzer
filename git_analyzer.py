@@ -232,8 +232,12 @@ class IntegratedAnalyzer:
         self.repo_path = repo_path
         self.console = Console()
 
-    def analyze(self) -> tuple[CocomoResults, GitMetrics, IntegratedMetrics]:
-        """Executa análise completa"""
+    def analyze(self, avg_salary_month_brl: float = 15000.0) -> tuple[CocomoResults, GitMetrics, IntegratedMetrics]:
+        """Executa análise completa
+
+        Args:
+            avg_salary_month_brl: Salário médio mensal em BRL por pessoa (padrão: R$15.000)
+        """
 
         with Progress(
             SpinnerColumn(),
@@ -249,7 +253,7 @@ class IntegratedAnalyzer:
             if code_analyzer.metrics.files_count == 0:
                 raise ValueError("Nenhum arquivo de código encontrado")
 
-            cocomo_results = code_analyzer.calculate_cocomo2()
+            cocomo_results = code_analyzer.calculate_cocomo2(avg_salary_month_brl)
             progress.update(task1, completed=True)
 
             # Análise Git

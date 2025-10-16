@@ -7,15 +7,23 @@ Analisa complexidade, esforço, tempo e recursos necessários para desenvolvimen
 import os
 import sys
 import argparse
+from importlib import import_module
 from pathlib import Path
-from dataclasses import dataclass
-from typing import Dict, List, Set
-from rich.console import Console
-from rich.table import Table
-from rich.panel import Panel
-from rich.tree import Tree
-from rich import box
-from rich.text import Text
+
+from analysis_config import COCOMO_COEFFICIENTS, COMPLEXITY_THRESHOLDS, compile_exclusion_spec
+from insights import build_cocomo_insights, build_ai_insights
+from models import CodeMetrics, CocomoResults
+from renderers import (
+    build_code_metrics_table,
+    build_language_distribution_table,
+    build_cocomo_table,
+    build_cost_panel,
+)
+
+Console = import_module("rich.console").Console
+Panel = import_module("rich.panel").Panel
+box = import_module("rich.box")
+Text = import_module("rich.text").Text
 
 
 # Extensões de arquivo por linguagem
@@ -43,52 +51,6 @@ LANGUAGE_EXTENSIONS = {
     'Dart': {'.dart'},
 }
 
-# Diretórios e arquivos a serem excluídos
-EXCLUDED_DIRS = {
-    'node_modules', '.venv', 'venv', 'env', 'vendor', '__pycache__',
-    '.git', '.svn', '.hg', 'dist', 'build', 'target', 'out',
-    '.idea', '.vscode', '.vs', 'bin', 'obj', '.gradle', '.next',
-    'coverage', '.nyc_output', '.pytest_cache', '.mypy_cache',
-    '.tox', '.eggs', '*.egg-info', '.cache'
-}
-
-EXCLUDED_FILES = {
-    '.pyc', '.pyo', '.so', '.dll', '.dylib', '.exe', '.o',
-    '.class', '.jar', '.war', '.min.js', '.min.css', '.map',
-    '.lock', 'package-lock.json', 'yarn.lock', 'poetry.lock',
-    'Pipfile.lock', 'composer.lock', 'Gemfile.lock'
-}
-
-
-@dataclass
-class CodeMetrics:
-    """Métricas de código coletadas"""
-    total_lines: int = 0
-    code_lines: int = 0
-    comment_lines: int = 0
-    blank_lines: int = 0
-    files_count: int = 0
-    languages: Dict[str, int] = None
-
-    def __post_init__(self):
-        if self.languages is None:
-            self.languages = {}
-
-
-@dataclass
-class CocomoResults:
-    """Resultados dos cálculos COCOMO II"""
-    kloc: float  # Milhares de linhas de código
-    effort_person_months: float  # Esforço em pessoa-mês
-    time_months: float  # Tempo de desenvolvimento em meses
-    people_required: float  # Pessoas necessárias
-    maintenance_people: float  # Pessoas para manutenção
-    expansion_people: float  # Pessoas para expansão
-    productivity: float  # Linhas por pessoa-mês
-    cost_estimate_brl: float  # Estimativa de custo (BRL)
-    complexity_level: str  # Nível de complexidade
-
-
 class CodeAnalyzer:
     """Analisador de código com metodologia COCOMO II"""
 
@@ -96,20 +58,27 @@ class CodeAnalyzer:
         self.root_path = root_path
         self.console = Console()
         self.metrics = CodeMetrics()
+        self._exclude_spec = compile_exclusion_spec()
 
     def should_exclude(self, path: Path) -> bool:
-        """Verifica se um arquivo ou diretório deve ser excluído"""
-        # Verifica diretórios excluídos
-        for part in path.parts:
-            if part in EXCLUDED_DIRS or part.startswith('.'):
-                return True
+        """Verifica se um arquivo ou diretório deve ser excluído."""
+        try:
+            relative = path.relative_to(self.root_path)
+        except ValueError:
+            relative = path
 
-        # Verifica extensões excluídas
-        if path.is_file():
-            if any(path.name.endswith(ext) for ext in EXCLUDED_FILES):
-                return True
+        parts = [part for part in relative.parts if part not in (".", "")]
+        if any(part.startswith('.') for part in parts):
+            return True
 
-        return False
+        relative_str = relative.as_posix()
+        if not relative_str or relative_str == '.':
+            return False
+
+        if path.is_dir():
+            relative_str = f"{relative_str.rstrip('/')}/"
+
+        return self._exclude_spec.match_file(relative_str)
 
     def detect_language(self, file_path: Path) -> str:
         """Detecta a linguagem de programação do arquivo"""
@@ -141,7 +110,7 @@ class CodeAnalyzer:
                     code += 1
 
             return total, code, comment, blank
-        except Exception as e:
+        except Exception:
             return 0, 0, 0, 0
 
     def analyze_directory(self):
@@ -177,36 +146,23 @@ class CodeAnalyzer:
                 else:
                     self.metrics.languages[language] = code
 
-    def calculate_cocomo2(self, mode: str = 'organic') -> CocomoResults:
-        """
-        Calcula métricas usando COCOMO II
+    def calculate_cocomo2(self, avg_salary_month_brl: float = 15000.0) -> CocomoResults:
+        """Calcula métricas usando COCOMO II.
 
-        Modos:
-        - organic: Projetos pequenos e simples (até 50 KLOC)
-        - semi-detached: Projetos médios (50-300 KLOC)
-        - embedded: Projetos grandes e complexos (>300 KLOC)
+        Args:
+            avg_salary_month_brl: Salário médio mensal em BRL por pessoa (padrão: R$15.000)
         """
         kloc = self.metrics.code_lines / 1000.0
 
-        # Coeficientes COCOMO II baseados no modo
-        coefficients = {
-            'organic': {'a': 2.4, 'b': 1.05, 'c': 2.5, 'd': 0.38},
-            'semi-detached': {'a': 3.0, 'b': 1.12, 'c': 2.5, 'd': 0.35},
-            'embedded': {'a': 3.6, 'b': 1.20, 'c': 2.5, 'd': 0.32}
-        }
+        mode = 'organic'
+        complexity = 'Baixa'
+        for threshold, candidate_mode, label in COMPLEXITY_THRESHOLDS:
+            if kloc <= threshold:
+                mode = candidate_mode
+                complexity = label
+                break
 
-        # Determina modo automaticamente baseado em KLOC
-        if kloc <= 50:
-            mode = 'organic'
-            complexity = 'Baixa'
-        elif kloc <= 300:
-            mode = 'semi-detached'
-            complexity = 'Média'
-        else:
-            mode = 'embedded'
-            complexity = 'Alta'
-
-        coef = coefficients[mode]
+        coef = COCOMO_COEFFICIENTS[mode]
 
         # Esforço em pessoa-mês: E = a * (KLOC)^b
         effort = coef['a'] * (kloc ** coef['b'])
@@ -227,8 +183,6 @@ class CodeAnalyzer:
         productivity = (self.metrics.code_lines / effort) if effort > 0 else 0
 
         # Estimativa de custo
-        # BRL: R$15,000/pessoa-mês (média Brasil para desenvolvedores)
-        avg_salary_month_brl = 15000
         cost_brl = effort * avg_salary_month_brl
 
         return CocomoResults(
@@ -243,117 +197,61 @@ class CodeAnalyzer:
             complexity_level=complexity
         )
 
-    def display_results(self, cocomo: CocomoResults):
+    def display_results(self, cocomo: CocomoResults, use_ai_insights: bool = False):
         """Exibe os resultados de forma elegante usando Rich"""
 
         # Painel principal
         title = Text("ANÁLISE COCOMO II", style="bold magenta")
         self.console.print(Panel(title, box=box.DOUBLE, expand=False))
 
-        # Tabela de métricas básicas
-        metrics_table = Table(title="📊 Métricas de Código", box=box.ROUNDED, show_header=True, header_style="bold cyan")
-        metrics_table.add_column("Métrica", style="yellow", width=30)
-        metrics_table.add_column("Valor", justify="right", style="green")
-
-        metrics_table.add_row("Total de Arquivos", f"{self.metrics.files_count:,}")
-        metrics_table.add_row("Total de Linhas", f"{self.metrics.total_lines:,}")
-        metrics_table.add_row("Linhas de Código", f"{self.metrics.code_lines:,}")
-        metrics_table.add_row("Linhas de Comentários", f"{self.metrics.comment_lines:,}")
-        metrics_table.add_row("Linhas em Branco", f"{self.metrics.blank_lines:,}")
-        metrics_table.add_row("KLOC (Milhares de LOC)", f"{cocomo.kloc:.2f}")
-
+        metrics_table = build_code_metrics_table(self.metrics, cocomo.kloc)
         self.console.print("\n")
         self.console.print(metrics_table)
 
-        # Tabela de linguagens
-        if self.metrics.languages:
-            lang_table = Table(title="💻 Distribuição por Linguagem", box=box.ROUNDED, show_header=True, header_style="bold cyan")
-            lang_table.add_column("Linguagem", style="yellow", width=20)
-            lang_table.add_column("Linhas de Código", justify="right", style="green")
-            lang_table.add_column("Porcentagem", justify="right", style="blue")
-
-            sorted_langs = sorted(self.metrics.languages.items(), key=lambda x: x[1], reverse=True)
-            for lang, lines in sorted_langs:
-                percentage = (lines / self.metrics.code_lines * 100) if self.metrics.code_lines > 0 else 0
-                lang_table.add_row(lang, f"{lines:,}", f"{percentage:.1f}%")
-
+        language_table = build_language_distribution_table(self.metrics)
+        if language_table:
             self.console.print("\n")
-            self.console.print(lang_table)
+            self.console.print(language_table)
 
-        # Tabela de resultados COCOMO II
-        cocomo_table = Table(title="🎯 Resultados COCOMO II", box=box.ROUNDED, show_header=True, header_style="bold cyan")
-        cocomo_table.add_column("Métrica", style="yellow", width=35)
-        cocomo_table.add_column("Valor", justify="right", style="green")
-
-        cocomo_table.add_row("Nível de Complexidade", f"{cocomo.complexity_level}")
-        cocomo_table.add_row("Esforço Total (pessoa-mês)", f"{cocomo.effort_person_months:.2f}")
-        cocomo_table.add_row("Tempo de Desenvolvimento (meses)", f"{cocomo.time_months:.2f}")
-        cocomo_table.add_row("Anos de Desenvolvimento", f"{cocomo.time_months / 12:.2f}")
-        cocomo_table.add_row("Pessoas Necessárias (Desenvolvimento)", f"{cocomo.people_required:.2f}")
-        cocomo_table.add_row("Pessoas para Manutenção", f"{cocomo.maintenance_people:.2f}")
-        cocomo_table.add_row("Pessoas para Expansão", f"{cocomo.expansion_people:.2f}")
-        cocomo_table.add_row("Produtividade (LOC/pessoa-mês)", f"{cocomo.productivity:.0f}")
-
+        cocomo_table = build_cocomo_table(cocomo)
         self.console.print("\n")
         self.console.print(cocomo_table)
 
-        # Painel de estimativa de custo
-        cost_panel = Panel(
-            f"[bold green]R$ {cocomo.cost_estimate_brl:,.2f}[/bold green]\n\n"
-            f"[dim]Baseado em R$15.000/pessoa-mês[/dim]\n"
-            f"[dim](média salarial para desenvolvedores no Brasil)[/dim]",
-            title="💰 Estimativa de Custo Total",
-            box=box.DOUBLE,
-            style="bold blue"
-        )
         self.console.print("\n")
-        self.console.print(cost_panel)
+        self.console.print(build_cost_panel(cocomo))
 
-        # Insights e recomendações
+        # Insights tradicionais
+        insights_content = build_cocomo_insights(cocomo)
         self.console.print("\n")
-        insights = Panel(
-            self._generate_insights(cocomo),
-            title="💡 Insights e Recomendações",
-            box=box.ROUNDED,
-            style="cyan"
+        self.console.print(
+            Panel(
+                insights_content,
+                title="💡 Insights e Recomendações",
+                box=box.ROUNDED,
+                style="cyan",
+            )
         )
-        self.console.print(insights)
 
-    def _generate_insights(self, cocomo: CocomoResults) -> str:
-        """Gera insights baseados nos resultados"""
-        insights = []
+        # Insights com IA (se solicitado)
+        if use_ai_insights:
+            self.console.print("\n")
+            self.console.print("[cyan]Gerando insights com IA...[/cyan]")
 
-        if cocomo.complexity_level == "Baixa":
-            insights.append("✓ Projeto de baixa complexidade - Ideal para equipes pequenas")
-        elif cocomo.complexity_level == "Média":
-            insights.append("⚡ Projeto de complexidade média - Requer gestão adequada")
-        else:
-            insights.append("⚠️  Projeto de alta complexidade - Requer gestão rigorosa")
+            ai_insights_content = build_ai_insights(
+                cocomo=cocomo,
+                code_metrics=self.metrics,
+                project_name=self.root_path.name
+            )
 
-        if cocomo.people_required < 5:
-            insights.append("✓ Equipe pequena suficiente para desenvolvimento")
-        elif cocomo.people_required < 15:
-            insights.append("⚡ Equipe média necessária - Considere divisão em squads")
-        else:
-            insights.append("⚠️  Equipe grande necessária - Estrutura organizacional complexa")
-
-        if cocomo.time_months < 6:
-            insights.append("✓ Tempo de desenvolvimento curto")
-        elif cocomo.time_months < 18:
-            insights.append("⚡ Tempo de desenvolvimento médio - Planejamento de releases importante")
-        else:
-            insights.append("⚠️  Desenvolvimento de longo prazo - Risco de mudanças tecnológicas")
-
-        # Recomendações de produtividade
-        if cocomo.productivity < 300:
-            insights.append("📉 Produtividade baixa - Considere refatoração ou automação")
-        elif cocomo.productivity < 600:
-            insights.append("📊 Produtividade adequada")
-        else:
-            insights.append("📈 Alta produtividade - Boas práticas aplicadas")
-
-        return "\n".join(insights)
-
+            self.console.print("\n")
+            self.console.print(
+                Panel(
+                    ai_insights_content,
+                    title="🤖 Insights com Inteligência Artificial",
+                    box=box.ROUNDED,
+                    style="magenta",
+                )
+            )
 
 def main():
     """Função principal"""
@@ -366,6 +264,12 @@ def main():
         nargs='?',
         default='.',
         help='Caminho do diretório a ser analisado (padrão: diretório atual)'
+    )
+    parser.add_argument(
+        '--ai-insights',
+        '-ai',
+        action='store_true',
+        help='Gera insights usando IA da OpenAI (requer OPENAI_API_KEY configurada)'
     )
 
     args = parser.parse_args()
@@ -392,7 +296,7 @@ def main():
     cocomo_results = analyzer.calculate_cocomo2()
 
     # Exibe resultados
-    analyzer.display_results(cocomo_results)
+    analyzer.display_results(cocomo_results, use_ai_insights=args.ai_insights)
 
 
 if __name__ == "__main__":

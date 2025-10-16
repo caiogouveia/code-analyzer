@@ -4,13 +4,38 @@ Analisador de código baseado na metodologia COCOMO II (Constructive Cost Model)
 
 ## Scripts Disponíveis
 
-### 1. main.py - Análise COCOMO II
+### 1. tui_analyzer.py - Interface TUI Interativa (RECOMENDADO)
+Interface TUI (Text User Interface) interativa para análise de múltiplos projetos com configuração personalizada de salário e geração automática de relatórios.
+
+**Características**:
+- Análise de múltiplos projetos em uma única execução
+- Configuração de salário personalizada
+- Geração automática de relatórios JSON com nome do projeto e data
+- Suporte para análise COCOMO II simples ou integrada com Git
+- Interface amigável com validação de entrada
+
+### 2. main.py - Análise COCOMO II
 Analisador de código que calcula métricas baseadas em COCOMO II.
 
-### 2. git_analyzer.py - Análise Integrada Git + COCOMO II
+### 3. git_analyzer.py - Análise Integrada Git + COCOMO II
 Análise completa que cruza dados COCOMO II com histórico de commits Git.
 
 ## Funcionalidades
+
+### 🤖 Insights com Inteligência Artificial (NOVO!)
+- **Análise profunda com IA da OpenAI**:
+  - Avaliação do valor do código e qualidade
+  - Comparação com métricas de mercado
+  - Estimativa de valor de mercado do projeto
+  - Recomendações estratégicas (curto, médio e longo prazo)
+  - Indicadores chave (ROI, Time to Market, Risco Técnico)
+  - Oportunidades de monetização, expansão e otimização
+- Disponível via:
+  - Interface TUI (aba "🤖 Insights IA")
+  - Linha de comando (`--ai-insights` flag)
+  - Uso programático (módulo `ai_insights.py`)
+
+📚 **[Ver documentação completa de Insights IA →](AI_INSIGHTS.md)**
 
 ### Análise COCOMO II (main.py)
 - Análise recursiva de diretórios e subdiretórios
@@ -84,7 +109,32 @@ pip install -e .
 
 ## Uso
 
-### Análise COCOMO II Básica
+### Interface TUI Interativa (Recomendado)
+
+#### Método 1: Script auxiliar
+```bash
+./run_tui.sh
+```
+
+#### Método 2: Execução direta
+```bash
+uv run python tui_analyzer.py
+# ou
+source .venv/bin/activate && python tui_analyzer.py
+```
+
+**Fluxo de uso**:
+1. Digite os caminhos dos projetos (um por vez)
+2. Pressione Enter sem digitar nada para finalizar a lista de projetos
+3. Configure o salário mensal (em R$)
+4. Escolha o tipo de análise (COCOMO II ou Integrado)
+5. Decida se deseja exportar relatórios JSON
+6. A análise será executada para todos os projetos
+7. Relatórios individuais serão gerados em `./reports/` com formato: `relatorio_{projeto}_{data}_{hora}.json`
+
+**Veja o guia completo**: [TUI_GUIDE.md](TUI_GUIDE.md)
+
+### Análise COCOMO II Básica (Linha de Comando)
 
 #### Análise do diretório atual
 ```bash
@@ -96,7 +146,21 @@ uv run python main.py
 uv run python main.py /caminho/para/projeto
 ```
 
-### Análise Integrada Git + COCOMO II
+#### Análise com Insights de IA (NOVO!)
+```bash
+# Configure primeiro sua chave da OpenAI
+export OPENAI_API_KEY="sk-proj-..."
+
+# Execute com insights de IA
+uv run python main.py --ai-insights
+
+# Ou para um projeto específico
+uv run python main.py /caminho/para/projeto --ai-insights
+```
+
+📚 **[Ver guia completo de Insights IA →](AI_INSIGHTS.md)**
+
+### Análise Integrada Git + COCOMO II (Linha de Comando)
 
 #### Análise completa do diretório atual
 ```bash
@@ -329,6 +393,11 @@ Estrutura do JSON:
 - Python >= 3.13
 - rich >= 13.7.0
 - pathspec >= 0.12.1
+- inquirer >= 3.1.3 (para interface TUI)
+- textual >= 0.47.0 (para interface TUI avançada)
+- reportlab >= 4.0.0 (para geração de PDF)
+- matplotlib >= 3.8.0 (para gráficos)
+- openai >= 1.0.0 (para insights com IA - opcional)
 
 ## Casos de Uso
 
@@ -358,6 +427,16 @@ Exporte os resultados em JSON para:
 - Criar dashboards personalizados
 - Integrar com ferramentas de BI
 - Gerar relatórios periódicos
+
+### 6. 🤖 Análise Estratégica com IA (NOVO!)
+Use os insights de IA para:
+- Avaliar o valor de mercado do projeto
+- Obter recomendações estratégicas personalizadas
+- Identificar oportunidades de monetização e expansão
+- Comparar com benchmarks da indústria
+- Avaliar riscos técnicos e ROI
+
+📚 **[Ver guia completo de Insights IA →](AI_INSIGHTS.md)**
 
 ## Limitações
 
